@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ffmpeg网页工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>ffmpeg-simple-web</h1>
+        <form id="videoForm">
+            <label for="videoPath">视频路径:</label>
+            <input type="text" id="videoPath" name="video_path" required>
+            <button type="submit">获取信息</button>
+        </form>
+        <div id="result"></div>
+        <hr>
+        <h2>音频提取</h2>
+        <form id="extractAudioForm">
+            <label for="extractVideoPath">视频路径:</label>
+            <input type="text" id="extractVideoPath" name="video_path" required>
+            <button type="submit">提取音频</button>
+        </form>
+        <div id="extractResult"></div>
+        <hr>
+        <h2>音频截取</h2>
+        <form id="trimAudioForm">
+            <label for="trimAudioPath">音频路径:</label>
+            <input type="text" id="trimAudioPath" name="audio_path" required>
+            <div class="time-inputs">
+                <label for="startTime">起始时间(秒):</label>
+                <input type="number" id="startTime" name="start_time" required>
+                <label for="endTime">结束时间(秒):</label>
+                <input type="number" id="endTime" name="end_time" required>
+            </div>
+            <button type="submit">截取音频</button>
+        </form>
+        <div id="trimResult"></div>
+    </div>
+
+    <script>
+        // 音频提取
+        document.getElementById('extractAudioForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/extract_audio', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('extractResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>音频提取成功！保存路径：${data.output_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('extractResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+
+        // 音频截取
+        document.getElementById('trimAudioForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/trim_audio', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('trimResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>音频截取成功！保存路径：${data.output_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('trimResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+
+        document.getElementById('videoForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/get_video_info', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('result');
+                if (data.success) {
+                    const info = data.data;
+                    const format = info.format;
+                    const stream = info.streams[0];
+                    
+                    // 转换时长
+                    const duration = parseFloat(format.duration);
+                    const hours = Math.floor(duration / 3600);
+                    const minutes = Math.floor((duration % 3600) / 60);
+                    const seconds = Math.floor(duration % 60);
+                    const durationStr = `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+                    
+                    // 使用后端已转换的文件大小
+                    const size = format.size;
+                    
+                    // 转换比特率
+                    const bitrate = (format.bit_rate / 1000000).toFixed(2); // 转换为Mbps
+                    
+                    // 计算帧率
+                    const frameRate = eval(stream.avg_frame_rate).toFixed(2);
+                    
+                    resultDiv.innerHTML = `
+                        <h2>视频信息</h2>
+                        <p>时长: ${durationStr}</p>
+                        <p>文件大小: ${size}</p>
+                        <p>分辨率: ${stream.width}x${stream.height}</p>
+                        <p>编码格式: ${stream.codec_name}</p>
+                        <p>比特率: ${bitrate} Mbps</p>
+                        <p>帧率: ${frameRate} fps</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+    </script>
+</body>
+</html>
