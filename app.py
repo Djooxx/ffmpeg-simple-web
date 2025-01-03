@@ -25,8 +25,17 @@ def get_video_info():
     video_path = request.form['video_path']
     try:
         # 使用ffprobe获取视频信息，指定获取第一个视频流
-        cmd = f'ffprobe -v error -select_streams v:0 -show_entries format=duration,size,bit_rate:stream=width,height,bit_rate,codec_name,avg_frame_rate,r_frame_rate -of json {video_path}'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        # 使用列表参数形式避免shell特殊字符问题
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 
+            'format=duration,size,bit_rate:stream=width,height,bit_rate,codec_name,avg_frame_rate,r_frame_rate',
+            '-of', 'json',
+            video_path  # 直接使用原始路径
+        ]
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
         if result.returncode == 0:
             # 解析ffprobe输出
             try:
@@ -50,8 +59,14 @@ def extract_audio():
     try:
         timestamp = int(time.time())
         output_path = video_path.replace('.mp4', f'_{timestamp}.mp3')
-        cmd = f'ffmpeg -i {video_path} -q:a 0 -map a {output_path}'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-q:a', '0',
+            '-map', 'a',
+            output_path
+        ]
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
         if result.returncode == 0:
             return jsonify({'success': True, 'output_path': output_path})
         else:
@@ -70,9 +85,16 @@ def trim_audio():
         timestamp = int(time.time())
         output_path = audio_path.replace('.mp3', f'_trimmed_{timestamp}.mp3')
         duration = float(end_time) - float(start_time)
-        cmd = f'ffmpeg -ss {start_time} -i {audio_path} -t {duration} -c copy {output_path}'
+        cmd = [
+            'ffmpeg',
+            '-ss', start_time,
+            '-i', audio_path,
+            '-t', str(duration),
+            '-c', 'copy',
+            output_path
+        ]
         print(f"准备执行命令: {cmd}")
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
         print(f"命令执行完成，返回码: {result.returncode}")
         if result.returncode == 0:
             print(f"音频截取成功，保存路径: {output_path}")
