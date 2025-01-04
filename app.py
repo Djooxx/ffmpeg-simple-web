@@ -3,6 +3,7 @@ import subprocess
 import time
 import math
 import json
+import os
 
 def convert_size(size_bytes):
     """将字节数转换为合适的单位"""
@@ -23,6 +24,10 @@ def index():
 @app.route('/get_video_info', methods=['POST'])
 def get_video_info():
     video_path = request.form['video_path']
+    if not os.path.exists(video_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(video_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
     try:
         # 使用ffprobe获取视频信息，指定获取第一个视频流
         # 使用列表参数形式避免shell特殊字符问题
@@ -56,9 +61,25 @@ def get_video_info():
 @app.route('/extract_audio', methods=['POST'])
 def extract_audio():
     video_path = request.form['video_path']
+    if not os.path.exists(video_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(video_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
     try:
         timestamp = int(time.time())
-        output_path = video_path.replace('.mp4', f'_{timestamp}.mp3')
+        # 获取输入文件扩展名
+        input_ext = video_path.split('.')[-1].lower()
+        # 支持常见视频格式
+        supported_formats = ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv']
+        if input_ext not in supported_formats:
+            return jsonify({'success': False, 'error': f'不支持的文件格式: {input_ext}'})
+        
+        # 根据输入格式选择输出格式
+        output_ext = 'mp3'  # 默认输出mp3
+        if input_ext in ['wav', 'flac']:  # 如果是无损格式，保持原格式
+            output_ext = input_ext
+            
+        output_path = video_path.rsplit('.', 1)[0] + f'_{timestamp}.{output_ext}'
         cmd = [
             'ffmpeg',
             '-i', video_path,
@@ -78,16 +99,34 @@ def extract_audio():
 def trim_audio():
     print("收到截取音频请求")
     audio_path = request.form['audio_path']
+    if not os.path.exists(audio_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(audio_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
     start_time = request.form['start_time']
     end_time = request.form['end_time']
     print(f"参数解析成功 - 音频路径: {audio_path}, 开始时间: {start_time}, 结束时间: {end_time}")
     try:
+        # 参数校验
+        start_time = float(start_time)
+        end_time = float(end_time)
+        if start_time < 0 or end_time < 0:
+            return jsonify({'success': False, 'error': '起始时间和结束时间必须大于0'})
+        if start_time >= end_time:
+            return jsonify({'success': False, 'error': '结束时间必须大于起始时间'})
         timestamp = int(time.time())
-        output_path = audio_path.replace('.mp3', f'_trimmed_{timestamp}.mp3')
+        # 获取输入文件扩展名
+        input_ext = audio_path.split('.')[-1].lower()
+        # 支持常见音频格式
+        supported_formats = ['mp3', 'wav', 'flac', 'aac', 'ogg']
+        if input_ext not in supported_formats:
+            return jsonify({'success': False, 'error': f'不支持的音频格式: {input_ext}'})
+            
+        output_path = audio_path.rsplit('.', 1)[0] + f'_{start_time}s-{end_time}s_{timestamp}.{input_ext}'
         duration = float(end_time) - float(start_time)
         cmd = [
             'ffmpeg',
-            '-ss', start_time,
+            '-ss', str(start_time),
             '-i', audio_path,
             '-t', str(duration),
             '-c', 'copy',
