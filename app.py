@@ -145,5 +145,56 @@ def trim_audio():
         print(f"发生异常: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/trim_video', methods=['POST'])
+def trim_video():
+    print("收到截取视频请求")
+    video_path = request.form['video_path']
+    if not os.path.exists(video_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(video_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
+    start_time = request.form['start_time']
+    end_time = request.form['end_time']
+    print(f"参数解析成功 - 视频路径: {video_path}, 开始时间: {start_time}, 结束时间: {end_time}")
+    try:
+        # 参数校验
+        start_time = float(start_time)
+        end_time = float(end_time)
+        if start_time < 0 or end_time < 0:
+            return jsonify({'success': False, 'error': '起始时间和结束时间必须大于0'})
+        if start_time >= end_time:
+            return jsonify({'success': False, 'error': '结束时间必须大于起始时间'})
+        timestamp = int(time.time())
+        # 获取输入文件扩展名
+        input_ext = video_path.split('.')[-1].lower()
+        # 支持常见视频格式
+        supported_formats = ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv']
+        if input_ext not in supported_formats:
+            return jsonify({'success': False, 'error': f'不支持的视频格式: {input_ext}'})
+            
+        output_path = video_path.rsplit('.', 1)[0] + f'_{start_time}s-{end_time}s_{timestamp}.{input_ext}'
+        duration = float(end_time) - float(start_time)
+        cmd = [
+            'ffmpeg',
+            '-ss', str(start_time),
+            '-i', video_path,
+            '-t', str(duration),
+            '-c:v', 'copy',
+            '-c:a', 'copy',
+            output_path
+        ]
+        print(f"准备执行命令: {cmd}")
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        print(f"命令执行完成，返回码: {result.returncode}")
+        if result.returncode == 0:
+            print(f"视频截取成功，保存路径: {output_path}")
+            return jsonify({'success': True, 'output_path': output_path})
+        else:
+            print(f"视频截取失败，错误信息: {result.stderr}")
+            return jsonify({'success': False, 'error': result.stderr})
+    except Exception as e:
+        print(f"发生异常: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
 if __name__ == '__main__':
     app.run(debug=True)

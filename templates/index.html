@@ -15,6 +15,20 @@
         </form>
         <div id="result"></div>
         <hr>
+        <h2>视频截取</h2>
+        <form id="trimVideoForm">
+            <label for="trimVideoPath">视频路径:</label>
+            <input type="text" id="trimVideoPath" name="video_path" required>
+            <div class="time-inputs">
+                <label for="videoStartTime">起始时间(秒):</label>
+                <input type="number" id="videoStartTime" name="start_time" min="0" step="0.1" required>
+                <label for="videoEndTime">结束时间(秒):</label>
+                <input type="number" id="videoEndTime" name="end_time" min="0" step="0.1" required>
+            </div>
+            <button type="submit">截取视频</button>
+        </form>
+        <div id="trimVideoResult"></div>
+        <hr>
         <h2>音频提取</h2>
         <form id="extractAudioForm">
             <label for="extractVideoPath">视频路径:</label>
@@ -39,6 +53,31 @@
     </div>
 
     <script>
+        // 视频截取
+        document.getElementById('trimVideoForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/trim_video', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('trimVideoResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>视频截取成功！保存路径：${data.output_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('trimVideoResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+
         // 音频提取
         document.getElementById('extractAudioForm').addEventListener('submit', function(e) {
             e.preventDefault();
