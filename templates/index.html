@@ -7,49 +7,58 @@
 <body>
     <div class="container">
         <h1>ffmpeg-simple-web</h1>
-        <form id="videoForm">
-            <h2>视频信息</h2>
-            <label for="videoPath">视频路径:</label>
-            <input type="text" id="videoPath" name="video_path" required>
-            <button type="submit">获取信息</button>
-        </form>
-        <div id="result"></div>
-        <hr>
-        <h2>视频截取</h2>
-        <form id="trimVideoForm">
-            <label for="trimVideoPath">视频路径:</label>
-            <input type="text" id="trimVideoPath" name="video_path" required>
-            <div class="time-inputs">
-                <label for="videoStartTime">起始时间(秒):</label>
-                <input type="number" id="videoStartTime" name="start_time" min="0" step="0.1" required>
-                <label for="videoEndTime">结束时间(秒):</label>
-                <input type="number" id="videoEndTime" name="end_time" min="0" step="0.1" required>
-            </div>
-            <button type="submit">截取视频</button>
-        </form>
-        <div id="trimVideoResult"></div>
-        <hr>
-        <h2>音频提取</h2>
-        <form id="extractAudioForm">
-            <label for="extractVideoPath">视频路径:</label>
-            <input type="text" id="extractVideoPath" name="video_path" required>
-            <button type="submit">提取音频</button>
-        </form>
-        <div id="extractResult"></div>
-        <hr>
-        <h2>音频截取</h2>
-        <form id="trimAudioForm">
-            <label for="trimAudioPath">音频路径:</label>
-            <input type="text" id="trimAudioPath" name="audio_path" required>
-            <div class="time-inputs">
-                <label for="startTime">起始时间(秒):</label>
-                <input type="number" id="startTime" name="start_time" min="0" step="0.1" required>
-                <label for="endTime">结束时间(秒):</label>
-                <input type="number" id="endTime" name="end_time" min="0" step="0.1" required>
-            </div>
-            <button type="submit">截取音频</button>
-        </form>
-        <div id="trimResult"></div>
+    <div class="module-container">
+        <div>
+            <form id="videoForm">
+                <h2>视频信息</h2>
+                <label for="videoPath">视频路径:</label>
+                <input type="text" id="videoPath" name="video_path" required>
+                <button type="submit">获取信息</button>
+            </form>
+            <div id="result"></div>
+        </div>
+        <div>
+            <h2>视频截取</h2>
+            <form id="trimVideoForm">
+                <label for="trimVideoPath">视频路径:</label>
+                <input type="text" id="trimVideoPath" name="video_path" required>
+                <div class="time-inputs">
+                    <label for="videoStartTime">起始时间(秒):</label>
+                    <input type="number" id="videoStartTime" name="start_time" min="0" step="0.1" required>
+                    <br>
+                    <label for="videoEndTime">结束时间(秒):</label>
+                    <input type="number" id="videoEndTime" name="end_time" min="0" step="0.1" required>
+                </div>
+                <button type="submit">截取视频</button>
+            </form>
+            <div id="trimVideoResult"></div>
+        </div>
+        <div>
+            <h2>音频提取</h2>
+            <form id="extractAudioForm">
+                <label for="extractVideoPath">视频路径:</label>
+                <input type="text" id="extractVideoPath" name="video_path" required>
+                <button type="submit">提取音频</button>
+            </form>
+            <div id="extractResult"></div>
+        </div>
+        <div>
+            <h2>音频截取</h2>
+            <form id="trimAudioForm">
+                <label for="trimAudioPath">音频路径:</label>
+                <input type="text" id="trimAudioPath" name="audio_path" required>
+                <div class="time-inputs">
+                    <label for="startTime">起始时间(秒):</label>
+                    <input type="number" id="startTime" name="start_time" min="0" step="0.1" required>
+                    <br>
+                    <label for="endTime">结束时间(秒):</label>
+                    <input type="number" id="endTime" name="end_time" min="0" step="0.1" required>
+                </div>
+                <button type="submit">截取音频</button>
+            </form>
+            <div id="trimResult"></div>
+        </div>
+    </div>
     </div>
 
     <script>

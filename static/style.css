@@ -6,7 +6,7 @@ body {
 }
 
 .container {
-    max-width: 800px;
+    width: auto;
     margin: 20px auto;
     padding: 20px;
     background-color: #fff;
@@ -63,7 +63,8 @@ button:hover {
 .error {
     color: #dc3545;
 }
-
+#videoForm,
+#trimVideoForm,
 #extractAudioForm,
 #trimAudioForm {
     margin-top: 30px;
@@ -73,6 +74,32 @@ button:hover {
     border-radius: 4px;
 }
 
+.module-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+}
+
+.module-container > div {
+    flex: 1 1 300px; /* 初始宽度为300px，允许增长和缩小 */
+    margin: 10px;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+    max-height: 400px; /* 限制模块的最大高度 */
+    overflow-y: auto; /* 如果内容超出高度，则显示滚动条 */
+}
+
+@media (max-width: 600px) {
+    .module-container > div {
+        flex-basis: 100%; /* 在小屏幕上占据整行 */
+    }
+}
+
+#result,
+#trimVideoResult,
 #extractResult,
 #trimResult {
     margin-top: 10px;
