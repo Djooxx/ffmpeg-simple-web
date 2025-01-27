@@ -196,5 +196,29 @@ def trim_video():
         print(f"发生异常: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/convert_video', methods=['POST'])
+def convert_video():
+    video_path = request.form['video_path']
+    if not os.path.exists(video_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(video_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
+    output_format = request.form['output_format']
+    try:
+        timestamp = int(time.time())
+        output_path = video_path.rsplit('.', 1)[0] + f'_{timestamp}.{output_format}'
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            output_path
+        ]
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            return jsonify({'success': True, 'output_path': output_path})
+        else:
+            return jsonify({'success': False, 'error': result.stderr})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 if __name__ == '__main__':
     app.run(debug=True)

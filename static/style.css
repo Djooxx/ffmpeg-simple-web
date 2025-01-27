@@ -81,7 +81,7 @@ button:hover {
 }
 
 .module-container > div {
-    flex: 1 1 300px; /* 初始宽度为300px，允许增长和缩小 */
+    width: calc(25% - 20px); /* 每行4个模块，减去margin */
     margin: 10px;
     padding: 20px;
     background-color: #f9f9f9;
