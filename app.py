@@ -4,6 +4,7 @@ import time
 import math
 import json
 import os
+import whisper
 
 def convert_size(size_bytes):
     """将字节数转换为合适的单位"""
@@ -219,6 +220,56 @@ def convert_video():
             return jsonify({'success': False, 'error': result.stderr})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/audio_to_text', methods=['POST'])
+def audio_to_text():
+    audio_path = request.form['audio_path']
+    if not os.path.exists(audio_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(audio_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
+    try:
+        model = whisper.load_model("large")
+        result = model.transcribe(audio_path, language="Chinese")
+        segments = result["segments"]
+        
+        # 生成 SRT 内容
+        srt_content = ""
+        for i, segment in enumerate(segments):
+            start = segment["start"]
+            end = segment["end"]
+            text = segment["text"].strip() # 去除首尾空白
+            srt_content += f"{i+1}\n"
+            srt_content += f"{format_timestamp(start, always_include_hours=True)} --> {format_timestamp(end, always_include_hours=True)}\n"
+            srt_content += f"{text}\n\n"
+
+        # 保存 SRT 文件
+        timestamp = int(time.time())
+        srt_path = audio_path.rsplit('.', 1)[0] + f'_{timestamp}' +'.srt'
+        with open(srt_path, 'w', encoding='utf-8') as f: # 指定 utf-8 编码
+            f.write(srt_content)
+
+        return jsonify({'success': True, 'text': "音频转文字成功，并保存为 srt 文件: " + srt_path}) # 修改返回信息
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+def format_timestamp(seconds: float, always_include_hours: bool = False):
+    if seconds is not None:
+        milliseconds = round(seconds * 1000.0)
+
+        hours = milliseconds // 3_600_000
+        milliseconds -= hours * 3_600_000
+
+        minutes = milliseconds // 60_000
+        milliseconds -= minutes * 60_000
+
+        seconds = milliseconds // 1_000
+        milliseconds -= seconds * 1_000
+
+        hours_marker = f"{hours:02d}:" if always_include_hours or hours > 0 else ""
+        return f"{hours_marker}{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+    else:
+        return None
 
 if __name__ == '__main__':
     app.run(debug=True)

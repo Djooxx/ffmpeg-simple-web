@@ -69,7 +69,16 @@
             </form>
             <div id="convertResult"></div>
         </div>
-    </div>
+        <div>
+            <h2>音频转文字</h2>
+            <form id="audioToTextForm">
+                <label for="audioPath">音频路径:</label>
+                <input type="text" id="audioPath" name="audio_path" required>
+                <button type="submit">音频转文字</button>
+            </form>
+            <div id="audioToTextResult"></div>
+        </div>
+        </div>
     </div>
 
     <script>
@@ -222,6 +231,30 @@
                 document.getElementById('convertResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
+
+        // 音频转文字
+        document.getElementById('audioToTextForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/audio_to_text', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('audioToTextResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `<p>转换成功！结果：${data.text}</p>`;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('audioToTextResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
     </script>
 </body>
 </html>
+</final_file_content>

@@ -66,6 +66,7 @@ button:hover {
 #videoForm,
 #trimVideoForm,
 #extractAudioForm,
+audioToTextForm,
 #trimAudioForm {
     margin-top: 30px;
     padding: 20px;
@@ -101,6 +102,7 @@ button:hover {
 #result,
 #trimVideoResult,
 #extractResult,
+#audioToTextResult,
 #trimResult {
     margin-top: 10px;
     padding: 10px;
