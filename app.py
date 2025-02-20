@@ -43,7 +43,7 @@ def get_video_info():
             '-of', 'json',
             video_path  # 直接使用原始路径
         ]
-        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         if result.returncode == 0:
             # 解析ffprobe输出
             try:
@@ -86,11 +86,13 @@ def extract_audio():
         cmd = [
             'ffmpeg',
             '-i', video_path,
+            '-map', '0:a:0',  # 选择第一个音频流
+            '-c:a', 'libmp3lame',  # 明确指定MP3编码器
             '-q:a', '0',
-            '-map', 'a',
+            '-ac', '2',  # 确保立体声输出
             output_path
         ]
-        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         if result.returncode == 0:
             return jsonify({'success': True, 'output_path': output_path})
         else:
@@ -136,7 +138,7 @@ def trim_audio():
             output_path
         ]
         print(f"准备执行命令: {cmd}")
-        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         print(f"命令执行完成，返回码: {result.returncode}")
         if result.returncode == 0:
             print(f"音频截取成功，保存路径: {output_path}")
@@ -187,7 +189,7 @@ def trim_video():
             output_path
         ]
         print(f"准备执行命令: {cmd}")
-        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         print(f"命令执行完成，返回码: {result.returncode}")
         if result.returncode == 0:
             print(f"视频截取成功，保存路径: {output_path}")
@@ -215,7 +217,7 @@ def convert_video():
             '-i', video_path,
             output_path
         ]
-        result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         if result.returncode == 0:
             return jsonify({'success': True, 'output_path': output_path})
         else:
