@@ -5,6 +5,8 @@ import math
 import json
 import os
 import whisper
+from funasr import AutoModel
+from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 def convert_size(size_bytes):
     """将字节数转换为合适的单位"""
@@ -270,6 +272,45 @@ def format_timestamp(seconds: float, always_include_hours: bool = False):
         return f"{hours_marker}{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
     else:
         return None
+
+@app.route('/sense_voice', methods=['POST'])
+def sense_voice():
+    audio_path = request.form['audio_path']
+    if not os.path.exists(audio_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(audio_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
+    try:
+        model_dir = "iic/SenseVoiceSmall"
+        model = AutoModel(
+            model=model_dir,
+            trust_remote_code=True, 
+            vad_model="fsmn-vad",
+            vad_kwargs={"max_single_segment_time": 30000},
+            device="cuda:0",
+        )
+
+        res = model.generate(
+            input=audio_path,
+            cache={},
+            language="auto",
+            use_itn=True,
+            batch_size_s=60,
+            merge_vad=True,
+            merge_length_s=15,
+        )
+
+        text = rich_transcription_postprocess(res[0]["text"])
+        
+        # 保存为txt文件
+        timestamp = int(time.time())
+        txt_path = audio_path.rsplit('.', 1)[0] + f'_sense_voice_{timestamp}.txt'
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write(text)
+
+        return jsonify({'success': True, 'text': text, 'txt_path': txt_path})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
     app.run(debug=True)

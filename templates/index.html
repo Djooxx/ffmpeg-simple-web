@@ -78,6 +78,16 @@
             </form>
             <div id="audioToTextResult"></div>
         </div>
+
+        <div>
+            <h2>音频转文字 (SenseVoiceSmall)</h2>
+            <form id="senseVoiceForm">
+                <label for="senseVoicePath">音频路径:</label>
+                <input type="text" id="senseVoicePath" name="audio_path" required>
+                <button type="submit">开始转换</button>
+            </form>
+            <div id="senseVoiceResult"></div>
+        </div>
         </div>
     </div>
 
@@ -252,6 +262,32 @@
             })
             .catch(error => {
                 document.getElementById('audioToTextResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+
+        // SenseVoiceSmall 音频转文字
+        document.getElementById('senseVoiceForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('/sense_voice', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('senseVoiceResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>转换成功！文本内容：${data.text}</p>
+                        <p>文件保存路径：${data.txt_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('senseVoiceResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
     </script>
