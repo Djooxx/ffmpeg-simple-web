@@ -236,7 +236,8 @@ def audio_to_text():
         model = whisper.load_model("large")
         result = model.transcribe(audio_path, language="Chinese")
         segments = result["segments"]
-        
+        print("segments")
+        print(segments)
         # 生成 SRT 内容
         srt_content = ""
         for i, segment in enumerate(segments):

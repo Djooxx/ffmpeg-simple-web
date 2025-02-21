@@ -1,9 +1,15 @@
 # ffmpeg-simple-web
 
 ## 使用
+
+### 1.执行以下命令
 ```
 git clone git@github.com:Djooxx/ffmpeg-simple-web.git
 cd ffmpeg-simple-web
+.\start.bat
+```
+#### start.bat将自动执行以下命令
+```
 # 创建虚拟环境
 python -m venv venv
 # 激活虚拟环境
@@ -12,7 +18,8 @@ venv\Scripts\activate
 pip install -r requirements.txt
 python app.py
 ```
-访问:
+
+### 2.访问:
 ```
 http://localhost:5000/
 ```
@@ -23,5 +30,6 @@ http://localhost:5000/
 ### 3.提取视频的音频
 ### 4.截取音频
 ### 5.语音转文字(whisper)
+### 6.语音转文字(SenseVoiceSmall)
 
 ![image](https://github.com/user-attachments/assets/15455295-37b3-4ef4-a375-239dc560302f)
