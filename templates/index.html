@@ -92,84 +92,17 @@
     </div>
 
     <script>
-        // 视频截取
-        document.getElementById('trimVideoForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            fetch('/trim_video', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                const resultDiv = document.getElementById('trimVideoResult');
-                if (data.success) {
-                    resultDiv.innerHTML = `
-                        <p>视频截取成功！保存路径：${data.output_path}</p>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
-                }
-            })
-            .catch(error => {
-                document.getElementById('trimVideoResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
-            });
-        });
-
-        // 音频提取
-        document.getElementById('extractAudioForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            fetch('/extract_audio', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                const resultDiv = document.getElementById('extractResult');
-                if (data.success) {
-                    resultDiv.innerHTML = `
-                        <p>音频提取成功！保存路径：${data.output_path}</p>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
-                }
-            })
-            .catch(error => {
-                document.getElementById('extractResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
-            });
-        });
-
-        // 音频截取
-        document.getElementById('trimAudioForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            
-            fetch('/trim_audio', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                const resultDiv = document.getElementById('trimResult');
-                if (data.success) {
-                    resultDiv.innerHTML = `
-                        <p>音频截取成功！保存路径：${data.output_path}</p>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
-                }
-            })
-            .catch(error => {
-                document.getElementById('trimResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
-            });
-        });
-
+        // 添加一个处理路径的通用函数
+        function processPath(path) {
+            // 移除首尾的双引号（如果存在）
+            return path.replace(/^"(.*)"$/, '$1');
+        }
+        
         document.getElementById('videoForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            // 处理路径
+            formData.set('video_path', processPath(formData.get('video_path')));
             
             fetch('/get_video_info', {
                 method: 'POST',
@@ -216,11 +149,88 @@
                 document.getElementById('result').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
+        // 视频截取
+        document.getElementById('trimVideoForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            // 处理路径
+            formData.set('video_path', processPath(formData.get('video_path')));
+            fetch('/trim_video', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('trimVideoResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>视频截取成功！保存路径：${data.output_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('trimVideoResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+
+        // 音频提取
+        document.getElementById('extractAudioForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            formData.set('video_path', processPath(formData.get('video_path')));
+            
+            fetch('/extract_audio', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('extractResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>音频提取成功！保存路径：${data.output_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('extractResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+        // 音频截取
+        document.getElementById('trimAudioForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            formData.set('audio_path', processPath(formData.get('audio_path')));
+            
+            fetch('/trim_audio', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('trimResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>音频截取成功！保存路径：${data.output_path}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('trimResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
 
         // 视频格式转换
         document.getElementById('convertVideoForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            formData.set('video_path', processPath(formData.get('video_path')));
             
             fetch('/convert_video', {
                 method: 'POST',
@@ -241,11 +251,11 @@
                 document.getElementById('convertResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
-
         // 音频转文字
         document.getElementById('audioToTextForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            formData.set('audio_path', processPath(formData.get('audio_path')));
             
             fetch('/audio_to_text', {
                 method: 'POST',
@@ -264,11 +274,11 @@
                 document.getElementById('audioToTextResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
-
         // SenseVoiceSmall 音频转文字
         document.getElementById('senseVoiceForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            formData.set('audio_path', processPath(formData.get('audio_path')));
             
             fetch('/sense_voice', {
                 method: 'POST',
