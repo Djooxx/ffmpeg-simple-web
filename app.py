@@ -1,5 +1,6 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import subprocess
+import numpy as np
 import time
 import math
 import json
@@ -7,6 +8,10 @@ import os
 import whisper
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
+from io import BytesIO
+import soundfile as sf
+from kokoro import KPipeline
+from urllib.parse import quote
 
 def convert_size(size_bytes):
     """将字节数转换为合适的单位"""
@@ -312,6 +317,49 @@ def sense_voice():
             f.write(text)
 
         return jsonify({'success': True, 'text': text, 'txt_path': txt_path})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+pipeline = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z')
+
+@app.route('/text_to_speech', methods=['POST'])
+def text_to_speech():
+    text = request.form['text']
+    voice = request.form['voice']
+
+    try:
+        generator = pipeline(
+            text, voice=voice,
+            speed=1, split_pattern=r'\n+'
+        )
+        
+        audio_segments = []
+        for i, (gs, ps, audio) in enumerate(generator):
+            audio_segments.append(audio)
+
+        if not audio_segments:
+            return jsonify({'success': False, 'error': 'No audio generated'})
+
+        # Concatenate audio segments
+        audio_data = np.concatenate(audio_segments)
+
+        # 将音频数据保存到 BytesIO 对象中
+        audio_buffer = BytesIO()
+        sf.write(audio_buffer, audio_data, 24000, format='WAV')
+        audio_buffer.seek(0)
+
+        # 返回音频文件
+        timestamp = int(time.time())
+        filename = f'audio_{timestamp}.wav'
+        response = send_file(
+            audio_buffer,
+            mimetype='audio/wav',
+            as_attachment=True,
+            download_name=filename
+        )
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        return response
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

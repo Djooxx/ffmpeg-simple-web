@@ -88,6 +88,27 @@
             </form>
             <div id="senseVoiceResult"></div>
         </div>
+
+        <div>
+            <h2>文字转语音</h2>
+            <form id="textToSpeechForm">
+                <label for="textInput">文字:</label>
+                <textarea id="textInput" name="text" required style="width: 90%;"></textarea>
+                <label for="voiceSelect">音色:</label>
+                <select id="voiceSelect" name="voice">
+                    <option value="zf_xiaobei">女-东北</option>
+                    <option value="zf_xiaoni">女-陕西</option>
+                    <option value="zf_xiaoxiao">女-普通话</option>
+                    <option value="zf_xiaoyi">女-普通话-卡通</option>
+                    <option value="zm_yunxia">男-普通话-卡通</option>
+                    <option value="zm_yunjian">男-中年-普通话</option>
+                    <option value="zm_yunxi">男-青年-普通话</option>
+                    <option value="zm_yunyang">男-中年-普通话2</option>
+                </select>
+                <button type="submit">生成语音</button>
+            </form>
+            <div id="textToSpeechResult"></div>
+        </div>
         </div>
     </div>
 
@@ -298,6 +319,42 @@
             })
             .catch(error => {
                 document.getElementById('senseVoiceResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+
+        // 文字转语音
+        document.getElementById('textToSpeechForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            let filename = 'audio.wav'; // 默认文件名
+            fetch('/text_to_speech', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                const contentDisposition = response.headers.get('Content-Disposition');
+                console.log(contentDisposition)
+                if (contentDisposition) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(contentDisposition);
+                    if (matches && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => {
+                document.getElementById('textToSpeechResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
     </script>

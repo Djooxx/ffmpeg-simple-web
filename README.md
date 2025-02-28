@@ -31,5 +31,6 @@ http://localhost:5000/
 ### 4.截取音频
 ### 5.语音转文字(whisper)
 ### 6.语音转文字(SenseVoiceSmall)
+### 6.文字转语音(kokoro)
 
 ![image](https://github.com/user-attachments/assets/15455295-37b3-4ef4-a375-239dc560302f)
