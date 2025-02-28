@@ -6,6 +6,7 @@ import math
 import json
 import os
 import whisper
+import re
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from io import BytesIO
@@ -320,19 +321,21 @@ def sense_voice():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-pipeline = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z')
 
 @app.route('/text_to_speech', methods=['POST'])
 def text_to_speech():
-    text = request.form['text']
-    voice = request.form['voice']
-
     try:
+        text = request.form['text']
+        voice = request.form['voice']
+        if re.search(r'\d$', voice):
+            pipeline = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z')  
+        else:
+            pipeline = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z')
         generator = pipeline(
             text, voice=voice,
-            speed=1, split_pattern=r'\n+'
+            speed=1, split_pattern=r'\n+|。'
         )
-        
+
         audio_segments = []
         for i, (gs, ps, audio) in enumerate(generator):
             audio_segments.append(audio)
@@ -350,7 +353,7 @@ def text_to_speech():
 
         # 返回音频文件
         timestamp = int(time.time())
-        filename = f'audio_{timestamp}.wav'
+        filename = f'audio_{voice}_{timestamp}.wav'
         response = send_file(
             audio_buffer,
             mimetype='audio/wav',
