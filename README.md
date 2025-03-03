@@ -29,13 +29,14 @@ http://localhost:5000/
 ### 2.截取视频
 ### 3.提取视频的音频
 ### 4.截取音频
-### 5.语音转文字(whisper)
-### 6.语音转文字(SenseVoiceSmall)
-### 6.文字转语音(kokoro)
+### 5.视频格式转换
+### 6.语音转文字(whisper)
+### 7.语音转文字(faster-whisper)
+### 8.语音转文字(SenseVoiceSmall)
+### 9.文字转语音(kokoro)
 
 ## 备注:
 无法访问huggingface时,kokoro会进行连接重试,非常耗时,直接设置host
 ```
 127.0.0.1 huggingface.co
 ```
-![image](https://github.com/user-attachments/assets/15455295-37b3-4ef4-a375-239dc560302f)

@@ -1,11 +1,13 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import subprocess
 import numpy as np
+import torch
 import time
 import math
 import json
 import os
 import whisper
+from faster_whisper import WhisperModel
 import re
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -261,6 +263,35 @@ def audio_to_text():
             f.write(srt_content)
 
         return jsonify({'success': True, 'text': "音频转文字成功，并保存为 srt 文件: " + srt_path}) # 修改返回信息
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/faster_whisper', methods=['POST'])
+def faster_whisper():
+    audio_path = request.form['audio_path']
+    if not os.path.exists(audio_path):
+        return jsonify({'success': False, 'error': '文件路径不存在'})
+    if not os.path.isfile(audio_path):
+        return jsonify({'success': False, 'error': '路径不是文件'})
+    try:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        compute_type = 'int8_float16' if device == 'cuda' else 'int8'
+        model = WhisperModel("large-v3", device=device, compute_type=compute_type)
+        
+        segments, info = model.transcribe(audio_path, beam_size=5, language="zh")
+        
+        srt_content = ""
+        for i, segment in enumerate(segments):
+            srt_content += f"{i+1}\n"
+            srt_content += f"{format_timestamp(segment.start)} --> {format_timestamp(segment.end)}\n"
+            srt_content += f"{segment.text.strip()}\n\n"
+        
+        timestamp = int(time.time())
+        srt_path = audio_path.rsplit('.', 1)[0] + f'_faster_whisper_{timestamp}.srt'
+        with open(srt_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
+        
+        return jsonify({'success': True, 'text': "转换成功", 'srt_path': srt_path})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

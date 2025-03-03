@@ -68,6 +68,8 @@ button:hover {
 #extractAudioForm,
 #audioToTextForm,
 #convertVideoForm,
+#fasterWhisperForm,
+#textToSpeechForm,
 #trimAudioForm {
     margin-top: 30px;
     padding: 20px;
@@ -81,31 +83,29 @@ button:hover {
     flex-wrap: wrap;
     justify-content: space-around;
 }
-
 .module-container > div {
-    width: calc(25% - 20px); /* 每行4个模块，减去margin */
+    width: calc(25% - 20px);
     margin: 10px;
     padding: 20px;
     background-color: #f9f9f9;
     border: 1px solid #ddd;
     border-radius: 4px;
     box-sizing: border-box;
-    max-height: 400px; /* 限制模块的最大高度 */
-    overflow-y: auto; /* 如果内容超出高度，则显示滚动条 */
+    min-height: 400px; /* 统一最小高度 */
 }
-
 @media (max-width: 600px) {
     .module-container > div {
         flex-basis: 100%; /* 在小屏幕上占据整行 */
     }
 }
-
 #result,
 #trimVideoResult,
 #extractResult,
 #audioToTextResult,
 #convertResult,
 #senseVoiceResult,
+#fasterWhisperResult,
+#textToSpeechResult,
 #trimResult {
     margin-top: 10px;
     padding: 10px;
@@ -113,16 +113,13 @@ button:hover {
     border: 1px solid #b3d9ff;
     border-radius: 4px;
 }
-
 .time-inputs {
     margin: 10px 0;
 }
-
 .time-inputs label {
     display: inline-block;
     margin-right: 10px;
 }
-
 .time-inputs input {
     width: 80px;
     margin-right: 20px;

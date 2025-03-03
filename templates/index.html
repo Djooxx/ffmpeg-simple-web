@@ -80,6 +80,16 @@
         </div>
 
         <div>
+            <h2>音频转文字(Faster Whisper)</h2>
+            <form id="fasterWhisperForm">
+                <label for="fasterWhisperPath">音频路径:</label>
+                <input type="text" id="fasterWhisperPath" name="audio_path" required>
+                <button type="submit">开始转换</button>
+            </form>
+            <div id="fasterWhisperResult"></div>
+        </div>
+
+        <div>
             <h2>音频转文字 (SenseVoiceSmall)</h2>
             <form id="senseVoiceForm">
                 <label for="senseVoicePath">音频路径:</label>
@@ -455,6 +465,33 @@
             })
             .catch(error => {
                 document.getElementById('textToSpeechResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
+        
+        // Faster Whisper 音频转文字
+        document.getElementById('fasterWhisperForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            formData.set('audio_path', processPath(formData.get('audio_path')));
+            
+            fetch('/faster_whisper', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('fasterWhisperResult');
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p>转换成功！字幕文件路径：${data.srt_path}</p>
+                        <p>内容预览：${data.text}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('fasterWhisperResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
     </script>
