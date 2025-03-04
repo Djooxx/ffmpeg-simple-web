@@ -103,7 +103,7 @@
             <h2>文字转语音</h2>
             <form id="textToSpeechForm">
                 <label for="textInput">文字:</label>
-                <textarea id="textInput" name="text" required style="width: 90%;"></textarea>
+                <textarea id="textInput" name="text" required style="width: 90%;max-width: 100%;"></textarea>
                 <label for="voiceSelect">音色:</label>
                 <select id="voiceSelect" name="voice">
                     <option value="zf_xiaobei">女-东北</option>
@@ -217,7 +217,15 @@
                 </select>
                 <button type="submit">生成语音</button>
             </form>
-            <div id="textToSpeechResult"></div>
+            <div id="textToSpeechResult">
+                <div id="audioControls" style="display: none;">
+                    <audio id="audioPlayer" hidden></audio>
+                    <button id="playPauseBtn">播放</button>
+                    <input type="range" id="progressBar" value="0" style="width: 50%;">
+                    <span id="timeDisplay">00:00 / 00:00</span>
+                    <a id="downloadLink" style="margin-left: 15px;">下载</a>
+                </div>
+            </div>
         </div>
         </div>
     </div>
@@ -436,38 +444,96 @@
         document.getElementById('textToSpeechForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
-            let filename = 'audio.wav'; // 默认文件名
+            
+            // 获取播放控制相关元素
+            const audioControls = document.getElementById('audioControls');
+            const audioPlayer = document.getElementById('audioPlayer');
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            const progressBar = document.getElementById('progressBar');
+            const timeDisplay = document.getElementById('timeDisplay');
+            const downloadLink = document.getElementById('downloadLink');
+        
+            // 先隐藏控制面板
+            audioControls.style.display = 'none';
+        
             fetch('/text_to_speech', {
                 method: 'POST',
                 body: formData
             })
             .then(response => {
                 const contentDisposition = response.headers.get('Content-Disposition');
-                console.log(contentDisposition)
+                let filename = 'audio.wav';
                 if (contentDisposition) {
                     const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
                     const matches = filenameRegex.exec(contentDisposition);
-                    if (matches && matches[1]) {
-                        filename = matches[1].replace(/['"]/g, '');
-                    }
+                    if (matches && matches[1]) filename = matches[1].replace(/['"]/g, '');
                 }
-                return response.blob();
-            })
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
+                
+                return response.blob().then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    
+                    // 设置音频源并显示控制面板
+                    audioPlayer.src = url;
+                    audioControls.style.display = 'block';
+                    downloadLink.href = url;
+                    downloadLink.download = filename;
+        
+                    // 重置播放器状态
+                    audioPlayer.addEventListener('loadedmetadata', () => {
+                        progressBar.value = 0;
+                        timeDisplay.textContent = 
+                            `${formatTime(0)} / ${formatTime(audioPlayer.duration)}`;
+                    });
+                });
             })
             .catch(error => {
+                audioControls.style.display = 'none';
                 document.getElementById('textToSpeechResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
         
+        // 确保在全局作用域添加时间格式化函数
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        // 添加事件监听器到播放器控件（只需要初始化一次）
+        document.addEventListener('DOMContentLoaded', () => {
+            const audioPlayer = document.getElementById('audioPlayer');
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            const progressBar = document.getElementById('progressBar');
+            const timeDisplay = document.getElementById('timeDisplay');
+        
+            audioPlayer.addEventListener('timeupdate', () => {
+                const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+                progressBar.value = progress;
+                timeDisplay.textContent = 
+                    `${formatTime(audioPlayer.currentTime)} / ${formatTime(audioPlayer.duration)}`;
+            });
+        
+            playPauseBtn.addEventListener('click', () => {
+                if (audioPlayer.paused) {
+                    audioPlayer.play();
+                    playPauseBtn.textContent = '暂停';
+                } else {
+                    audioPlayer.pause();
+                    playPauseBtn.textContent = '播放';
+                }
+            });
+        
+            progressBar.addEventListener('input', (e) => {
+                const time = (e.target.value / 100) * audioPlayer.duration;
+                audioPlayer.currentTime = time;
+            });
+        
+            audioPlayer.addEventListener('ended', () => {
+                playPauseBtn.textContent = '播放';
+                progressBar.value = 0;
+            });
+        });
+
         // Faster Whisper 音频转文字
         document.getElementById('fasterWhisperForm').addEventListener('submit', function(e) {
             e.preventDefault();
