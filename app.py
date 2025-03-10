@@ -352,16 +352,17 @@ def sense_voice():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-
+pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z')  
+pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z')
 @app.route('/text_to_speech', methods=['POST'])
 def text_to_speech():
     try:
         text = request.form['text']
         voice = request.form['voice']
         if re.search(r'\d$', voice):
-            pipeline = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z')  
+            pipeline = pipeline_v1_1  
         else:
-            pipeline = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z')
+            pipeline = pipeline_v1_0
         generator = pipeline(
             text, voice=voice,
             speed=1, split_pattern=r'\n+|。'
