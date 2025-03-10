@@ -360,12 +360,12 @@ def text_to_speech():
         text = request.form['text']
         voice = request.form['voice']
         if re.search(r'\d$', voice):
-            pipeline = pipeline_v1_1  
+            pipeline = pipeline_v1_1
         else:
             pipeline = pipeline_v1_0
         generator = pipeline(
             text, voice=voice,
-            speed=1, split_pattern=r'\n+|。'
+            speed=1, split_pattern = r'\n+|。|\.|；|;'
         )
 
         audio_segments = []
