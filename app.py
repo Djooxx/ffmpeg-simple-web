@@ -365,7 +365,7 @@ def text_to_speech():
             pipeline = pipeline_v1_0
         generator = pipeline(
             text, voice=voice,
-            speed=1, split_pattern = r'\n+|。|\.|；|;'
+            speed=1, split_pattern = r'\\n+|[.。;；!！?？]|…|\\.{2,}'
         )
 
         audio_segments = []
