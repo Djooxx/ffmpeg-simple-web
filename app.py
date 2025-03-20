@@ -13,8 +13,9 @@ from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from io import BytesIO
 import soundfile as sf
-from kokoro import KPipeline
-from urllib.parse import quote
+from kokoro import KModel,KPipeline
+import tqdm
+import traceback
 
 def convert_size(size_bytes):
     """将字节数转换为合适的单位"""
@@ -351,9 +352,17 @@ def sense_voice():
         return jsonify({'success': True, 'text': text, 'txt_path': txt_path})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+    
 
-pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z')  
-pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z')
+en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=False)
+def en_callable(text):
+    return next(en_pipeline(text)).phonemes
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model_v1_1 = KModel(repo_id='hexgrad/Kokoro-82M-v1.1-zh').to(device).eval()
+model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
+pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z' , en_callable=en_callable) 
+pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable) 
+
 @app.route('/text_to_speech', methods=['POST'])
 def text_to_speech():
     try:
@@ -363,40 +372,54 @@ def text_to_speech():
             pipeline = pipeline_v1_1
         else:
             pipeline = pipeline_v1_0
-        generator = pipeline(
-            text, voice=voice,
-            speed=1, split_pattern = r'\\n+|[.。;；!！?？]|…|\\.{2,}'
-        )
+        # 处理text
+        # 分割模式
+        split_pattern = r'\n+|[。;；!！?？]|…|\.{2,}'
+        # 使用re.split()方法根据split_pattern分割文本
+        sentences = re.split(split_pattern, text)
+        # 创建结果列表，并确保过滤掉任何空字符串或仅包含空白字符的情况
+        texts = [(sentence.strip(),) for sentence in sentences if sentence.strip()]
 
-        audio_segments = []
-        for i, (gs, ps, audio) in enumerate(generator):
-            audio_segments.append(audio)
-
-        if not audio_segments:
+        # 打印结果
+        print(texts)
+        wavs = []
+        for paragraph in tqdm.tqdm(texts):
+            for i, sentence in enumerate(paragraph):
+                print("处理文字: " + sentence)
+                generator = pipeline(sentence, voice=voice, speed=speed_callable)
+                result = next(generator)
+                wav = result.audio
+                if i == 0 and wavs:
+                    wav = np.concatenate([np.zeros(5000), wav])
+                wavs.append(wav)
+        if not wavs:
             return jsonify({'success': False, 'error': 'No audio generated'})
-
         # Concatenate audio segments
-        audio_data = np.concatenate(audio_segments)
-
-        # 将音频数据保存到 BytesIO 对象中
+        audio_data = np.concatenate(wavs)
+        # 返回音频数据
+        timestamp = int(time.time())
+        filename = f'audio_{voice}_{timestamp}.wav'
         audio_buffer = BytesIO()
         sf.write(audio_buffer, audio_data, 24000, format='WAV')
         audio_buffer.seek(0)
-
-        # 返回音频文件
-        timestamp = int(time.time())
-        filename = f'audio_{voice}_{timestamp}.wav'
-        response = send_file(
+        return send_file(
             audio_buffer,
             mimetype='audio/wav',
             as_attachment=True,
             download_name=filename
         )
-        response.headers['Cache-Control'] = 'no-store, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        return response
     except Exception as e:
+        print(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)})
+
+
+def speed_callable(len_ps):
+    speed = 0.8
+    if len_ps <= 83:
+        speed = 1
+    elif len_ps < 183:
+        speed = 1 - (len_ps - 83) / 500
+    return speed * 1.1
 
 if __name__ == '__main__':
     app.run(debug=True)
