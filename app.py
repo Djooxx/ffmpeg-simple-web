@@ -190,13 +190,16 @@ def trim_video():
         duration = float(end_time) - float(start_time)
         cmd = [
             'ffmpeg',
-            '-ss', str(start_time),
+            '-ss', str(start_time),   # 初步快速定位（关键帧对齐）
             '-i', video_path,
+            '-ss', '0',               # 精确微调（从已定位的位置开始逐帧解码）
             '-t', str(duration),
-            '-c:v', 'copy',
-            '-c:a', 'copy',
-            output_path
         ]
+        if start_time > 0:
+            cmd.extend(['-c:v', 'hevc_nvenc', '-b:v', '5M'])  # 添加硬件编码和比特率设置
+        else:
+            cmd.extend(['-c:v', 'copy'])
+        cmd.extend(['-c:a', 'copy', output_path])
         print(f"准备执行命令: {cmd}")
         result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         print(f"命令执行完成，返回码: {result.returncode}")
