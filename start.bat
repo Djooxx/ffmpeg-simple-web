@@ -13,7 +13,7 @@ call venv\Scripts\activate
 :: 检查 requirements.txt 是否存在并安装依赖
 if exist "requirements.txt" (
     echo 检查依赖项...
-    pip install -r requirements.txt
+    pip install -i https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com -r requirements.txt
 ) else (
     echo requirements.txt 文件不存在，跳过依赖安装。
 )
