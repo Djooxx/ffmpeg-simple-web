@@ -227,6 +227,23 @@
                 </div>
             </div>
         </div>
+
+        <div>
+            <h2>srt文件转音频</h2>
+            <form id="srtForm">
+                <label for="srtPath">SRT文件路径:</label>
+                <input type="text" id="srtPath" name="srtPath" required>
+                <button type="submit">生成音频</button>
+            </form>
+            <div id="srtToSpeechResult">
+                <div id="srtAudioControls" style="display: none;">
+                    <audio id="srtAudioPlayer" hidden></audio>
+                    <button id="srtPlayPauseBtn">播放</button>
+                    <input type="range" id="srtProgressBar" value="0" style="width: 50%;">
+                    <span id="srtTimeDisplay">00:00 / 00:00</span>
+                    <a id="srtDownloadLink" style="display: block; margin-top: 15px; margin-left: 15px;">下载</a>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -560,6 +577,91 @@
                 document.getElementById('fasterWhisperResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
             });
         });
+
+        // srt文件转音频e
+        document.getElementById('srtForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            // 获取音频播放器相关元素
+            const srtAudioControls = document.getElementById('srtAudioControls');
+            const srtAudioPlayer = document.getElementById('srtAudioPlayer');
+            const srtPlayPauseBtn = document.getElementById('srtPlayPauseBtn');
+            const srtProgressBar = document.getElementById('srtProgressBar');
+            const srtTimeDisplay = document.getElementById('srtTimeDisplay');
+            const srtDownloadLink = document.getElementById('srtDownloadLink');
+
+            // 先隐藏音频控制面板
+            srtAudioControls.style.display = 'none';
+
+            const formData = new FormData(this);
+            formData.set('srt_path', processPath(formData.get('srtPath')));
+    
+            fetch('/srt_to_audio', {
+                method: 'POST',
+                body: formData
+            })
+           .then(response => {
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'audio.wav';
+                if (contentDisposition) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(contentDisposition); 
+                    if (matches && matches[1]) filename = matches[1].replace(/['"]/g, '');
+                }
+
+                return response.blob().then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+
+                    // 设置音频源并显示控制面板
+                    srtAudioPlayer.src = url;
+                    srtAudioControls.style.display = 'block';
+                    srtDownloadLink.href = url;
+                    srtDownloadLink.download = filename;
+
+                    // 重置播放器状态
+                    srtAudioPlayer.addEventListener('loadedmetadata', () => {
+                        srtProgressBar.value = 0;
+                        srtTimeDisplay.textContent =
+                            `${formatTime(0)} / ${formatTime(srtAudioPlayer.duration)}`;
+                    });  
+                }) 
+           })
+           .catch(error => {
+                srtAudioControls.style.display = 'none';
+                document.getElementById('srtToSpeechResult').innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            }); 
+           })
+        // 添加事件监听器到播放器控件（只需要初始化一次）
+        document.addEventListener('DOMContentLoaded', () => {
+            const srtAudioPlayer = document.getElementById('srtAudioPlayer');
+            const srtPlayPauseBtn = document.getElementById('srtPlayPauseBtn');
+            const srtProgressBar = document.getElementById('srtProgressBar');  
+            const srtTimeDisplay = document.getElementById('srtTimeDisplay');
+
+            srtAudioPlayer.addEventListener('timeupdate', () => {
+                const progress = (srtAudioPlayer.currentTime / srtAudioPlayer.duration) * 100;
+                srtProgressBar.value = progress;
+                srtTimeDisplay.textContent =
+                    `${formatTime(srtAudioPlayer.currentTime)} / ${formatTime(srtAudioPlayer.duration)}`;  
+            })
+            srtPlayPauseBtn.addEventListener('click', () => {
+                if (srtAudioPlayer.paused) {
+                    srtAudioPlayer.play();
+                    srtPlayPauseBtn.textContent = '暂停'; 
+                } else {
+                    srtAudioPlayer.pause();
+                    srtPlayPauseBtn.textContent = '播放'; 
+                }
+            });
+            srtProgressBar.addEventListener('input', (e) => {
+                const time = (e.target.value / 100) * srtAudioPlayer.duration;
+                srtAudioPlayer.currentTime = time; 
+            });
+            srtAudioPlayer.addEventListener('ended', () => {
+                srtPlayPauseBtn.textContent = '播放';
+                srtProgressBar.value = 0; 
+            });
+        })
     </script>
 </body>
 </html>

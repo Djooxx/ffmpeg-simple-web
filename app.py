@@ -371,30 +371,7 @@ def text_to_speech():
     try:
         text = request.form['text']
         voice = request.form['voice']
-        if re.search(r'\d$', voice):
-            pipeline = pipeline_v1_1
-        else:
-            pipeline = pipeline_v1_0
-        # 处理text
-        # 分割模式
-        split_pattern = r'\n+|[。;；!！?？]|…|\.{2,}'
-        # 使用re.split()方法根据split_pattern分割文本
-        sentences = re.split(split_pattern, text)
-        # 创建结果列表，并确保过滤掉任何空字符串或仅包含空白字符的情况
-        texts = [(sentence.strip(),) for sentence in sentences if sentence.strip()]
-
-        # 打印结果
-        print(texts)
-        wavs = []
-        for paragraph in tqdm.tqdm(texts):
-            for i, sentence in enumerate(paragraph):
-                print("处理文字: " + sentence)
-                generator = pipeline(sentence, voice=voice, speed=speed_callable)
-                result = next(generator)
-                wav = result.audio
-                if i == 0 and wavs:
-                    wav = np.concatenate([np.zeros(5000), wav])
-                wavs.append(wav)
+        wavs = generate_audio_data(text, voice)
         if not wavs:
             return jsonify({'success': False, 'error': 'No audio generated'})
         # Concatenate audio segments
@@ -415,6 +392,35 @@ def text_to_speech():
         print(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)})
 
+def generate_audio_data(text, voice):
+    wavs = []
+    try:
+        if re.search(r'\d$', voice):
+            pipeline = pipeline_v1_1
+        else:
+            pipeline = pipeline_v1_0
+        # 处理text
+        # 分割模式
+        split_pattern = r'\n+|[。;；!！?？]|…|\.{2,}'
+        # 使用re.split()方法根据split_pattern分割文本
+        sentences = re.split(split_pattern, text)
+        # 创建结果列表，并确保过滤掉任何空字符串或仅包含空白字符的情况
+        texts = [(sentence.strip(),) for sentence in sentences if sentence.strip()]
+        # 打印结果
+        print(texts)
+        for paragraph in tqdm.tqdm(texts):
+            for i, sentence in enumerate(paragraph):
+                print("处理文字: " + sentence)
+                generator = pipeline(sentence, voice=voice, speed=speed_callable)
+                result = next(generator)
+                wav = result.audio
+                if i == 0 and wavs:
+                    wav = np.concatenate([np.zeros(5000), wav])
+                wavs.append(wav)
+        return wavs
+    except Exception as e:
+        print(traceback.format_exc())
+        return wavs
 
 def speed_callable(len_ps):
     speed = 0.8
@@ -423,6 +429,112 @@ def speed_callable(len_ps):
     elif len_ps < 183:
         speed = 1 - (len_ps - 83) / 500
     return speed * 1.1
+
+@app.route('/srt_to_audio', methods=['POST'])
+def srt_to_audio():
+    print("收到SRT转音频请求")
+    srt_path = request.form['srt_path']
+    print(srt_path+"==测试存在")
+    if not os.path.exists(srt_path):
+        print(srt_path+"==不存在")
+        return jsonify({'success': False, 'error': 'SRT文件路径不存在'})
+    if not os.path.isfile(srt_path):
+        print(srt_path+"==不是文件")
+        return jsonify({'success': False, 'error': 'SRT路径不是文件'})
+    print(srt_path+"==存在")
+    # 读取SRT文件内容
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        srt_content = f.read()
+    print("文本内容=="+srt_content)
+    # 分段解析SRT内容
+    segments = parse_srt(srt_content)
+    print("分段=="+str(segments))
+    # 调用text_to_speech方法生成音频
+    wavs = []
+    for segment in segments:
+        text = segment['text']
+        voice = 'zf_xiaoxiao'
+        wavTemp = generate_audio_data(text=text, voice=voice)
+        if wavTemp:
+            wavs.append(np.concatenate(wavTemp))
+        else:
+            return jsonify({'success': False, 'error': '音频生成失败'})
+    print("wavs=="+wavs.__len__().__str__())
+    # 按时间戳拼接音频
+    audio_data = concatenate_audio(wavs, segments)
+    print("拼接音频完成")
+    # 保存音频文件
+    timestamp = int(time.time())
+    srt_name = os.path.splitext(os.path.basename(srt_path))[0]
+    filename = f'audio_srt_{srt_name}_{timestamp}.wav'
+    audio_buffer = BytesIO()
+    sf.write(audio_buffer, audio_data, 24000, format='WAV')
+    audio_buffer.seek(0)
+    return send_file(
+        audio_buffer,
+        mimetype='audio/wav',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+def parse_srt(srt_content):
+    segments = []
+    lines = srt_content.strip().split('\n\n')
+    for line in lines:
+        parts = line.split('\n')
+        if len(parts) >= 3:
+            index = parts[0]
+            time_range = parts[1]
+            text = '\n'.join(parts[2:])
+            start_time, end_time = parse_time_range(time_range)
+            segments.append({
+                'index': index,
+                'start_time': start_time,
+                'end_time': end_time,
+                'text': text
+            })
+    return segments
+
+
+def parse_time_range(time_range):
+    start_str, end_str = time_range.split(' --> ')
+    start_time = convert_time_to_seconds(start_str)
+    end_time = convert_time_to_seconds(end_str)
+    return start_time, end_time
+
+
+def convert_time_to_seconds(time_str):
+    parts = time_str.split(':')
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    seconds_parts = parts[2].split(',')
+    seconds = int(seconds_parts[0])
+    milliseconds = int(seconds_parts[1])
+    total_seconds = hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+    return total_seconds
+
+
+def concatenate_audio(wavs, segments):
+    total_duration = segments[-1]['end_time']
+    # 计算每个音频段应有的采样点数
+    sample_rate = 24000
+    audio_data = np.zeros(int(total_duration * sample_rate))
+    
+    for i, (wav, segment) in enumerate(zip(wavs, segments)):
+        start_time = segment['start_time']
+        end_time = segment['end_time']
+        expected_samples = int((end_time - start_time) * sample_rate)
+        
+        # 裁剪或填充音频数据到预期长度
+        if len(wav) > expected_samples:
+            wav = wav[:expected_samples]
+        elif len(wav) < expected_samples:
+            wav = np.pad(wav, (0, expected_samples - len(wav)), 'constant')
+        
+        start_index = int(start_time * sample_rate)
+        audio_data[start_index:start_index + expected_samples] = wav
+    return audio_data
 
 if __name__ == '__main__':
     app.run(debug=False)
