@@ -10,12 +10,21 @@ if not exist "venv\Scripts\activate" (
 :: 激活虚拟环境
 call venv\Scripts\activate
 
-:: 检查 requirements.txt 是否存在并安装依赖
 if exist "requirements.txt" (
-    echo 检查依赖项...
+    echo 安装基础依赖...
     pip install -i https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com -r requirements.txt
 ) else (
     echo requirements.txt 文件不存在，跳过依赖安装。
+)
+
+:: 预检NVIDIA显卡是否存在
+where nvidia-smi >nul 2>&1
+if %errorlevel% equ 0 (
+    echo 检测到NVIDIA显卡，安装CUDA版本...
+	pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
+) else (
+    echo 无NVIDIA显卡，直接安装CPU版本...
+    pip install torch==2.3 torchaudio==2.3
 )
 
 :: 运行应用

@@ -279,7 +279,8 @@ def faster_whisper():
         return jsonify({'success': False, 'error': '路径不是文件'})
     try:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        compute_type = 'int8_float16' if device == 'cuda' else 'int8'
+        print("faster_whisper使用设备: " + device)
+        compute_type = 'int8' if device == 'cuda' else 'int8'
         model = WhisperModel("large-v3", device=device, compute_type=compute_type)
         
         segments, info = model.transcribe(audio_path, beam_size=5, language="zh")
@@ -361,10 +362,11 @@ en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=False
 def en_callable(text):
     return next(en_pipeline(text)).phonemes
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print("kokoro使用设备: " + device)
 model_v1_1 = KModel(repo_id='hexgrad/Kokoro-82M-v1.1-zh').to(device).eval()
 model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
-pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z' , en_callable=en_callable) 
-pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable) 
+pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z' , en_callable=en_callable, model=model_v1_1) 
+pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable, model=model_v1_0) 
 
 @app.route('/text_to_speech', methods=['POST'])
 def text_to_speech():
