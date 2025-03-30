@@ -518,24 +518,44 @@ def convert_time_to_seconds(time_str):
 
 
 def concatenate_audio(wavs, segments):
-    total_duration = segments[-1]['end_time']
-    # 计算每个音频段应有的采样点数
     sample_rate = 24000
-    audio_data = np.zeros(int(total_duration * sample_rate))
-    
-    for i, (wav, segment) in enumerate(zip(wavs, segments)):
-        start_time = segment['start_time']
-        end_time = segment['end_time']
-        expected_samples = int((end_time - start_time) * sample_rate)
+    max_end_sample = 0
+    # 第一遍：确定所需的总长度
+    for wav, segment in zip(wavs, segments):
+        start_sample = int(segment['start_time'] * sample_rate)
+        end_sample = start_sample + len(wav)
+        if end_sample > max_end_sample:
+            max_end_sample = end_sample
+
+    # 初始化音频数据数组
+    # 增加一点缓冲区，防止浮点数精度问题导致数组越界
+    audio_data = np.zeros(max_end_sample + int(0.1 * sample_rate)) 
+
+    # 第二遍：放置音频片段，允许重叠
+    for wav, segment in zip(wavs, segments):
+        start_sample = int(segment['start_time'] * sample_rate)
+        end_sample = start_sample + len(wav)
         
-        # 裁剪或填充音频数据到预期长度
-        if len(wav) > expected_samples:
-            wav = wav[:expected_samples]
-        elif len(wav) < expected_samples:
-            wav = np.pad(wav, (0, expected_samples - len(wav)), 'constant')
-        
-        start_index = int(start_time * sample_rate)
-        audio_data[start_index:start_index + expected_samples] = wav
+        # 确保切片不会超出 audio_data 的边界
+        if end_sample > len(audio_data):
+            # 如果计算出的结束点超出数组，截断 wav 以适应
+            wav_to_add = wav[:len(audio_data) - start_sample]
+            end_sample = len(audio_data) # 调整 end_sample 以适应
+        else:
+            wav_to_add = wav
+
+        # 将音频数据添加到主数组中
+        # 使用 += 允许混合/重叠
+        # 确保 wav_to_add 的长度与目标切片的长度匹配
+        target_slice_len = end_sample - start_sample
+        if len(wav_to_add) > target_slice_len:
+             wav_to_add = wav_to_add[:target_slice_len]
+        elif len(wav_to_add) < target_slice_len:
+             # 如果 wav_to_add 较短（理论上不应发生在此逻辑中），则填充
+             wav_to_add = np.pad(wav_to_add, (0, target_slice_len - len(wav_to_add)), 'constant')
+
+        audio_data[start_sample:end_sample] += wav_to_add 
+
     return audio_data
 
 if __name__ == '__main__':
