@@ -356,15 +356,14 @@ def sense_voice():
         return jsonify({'success': True, 'text': text, 'txt_path': txt_path})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
-    
 
-en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=False)
+device = 'cuda' if torch.cuda.is_available() else 'cpu'   
+model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
+en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=model_v1_0)
 def en_callable(text):
-    return next(en_pipeline(text)).phonemes
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    return next(en_pipeline(text, voice='af_alloy')).phonemes
 print("kokoro使用设备: " + device)
 model_v1_1 = KModel(repo_id='hexgrad/Kokoro-82M-v1.1-zh').to(device).eval()
-model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
 pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z' , en_callable=en_callable, model=model_v1_1) 
 pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable, model=model_v1_0) 
 
