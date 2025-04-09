@@ -332,7 +332,7 @@ def sense_voice():
             trust_remote_code=True, 
             vad_model="fsmn-vad",
             vad_kwargs={"max_single_segment_time": 30000},
-            device="cuda:0",
+            device="cuda:0" if torch.cuda.is_available() else "cpu",
         )
 
         res = model.generate(
@@ -556,6 +556,10 @@ def concatenate_audio(wavs, segments):
         audio_data[start_sample:end_sample] += wav_to_add 
 
     return audio_data
+
+# 导入并注册ollama_chat蓝图
+from ollama_chat import ollama_chat_bp
+app.register_blueprint(ollama_chat_bp)
 
 if __name__ == '__main__':
     app.run(debug=False)

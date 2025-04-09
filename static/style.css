@@ -99,6 +99,60 @@ button:hover {
         flex-basis: 100%; /* 在小屏幕上占据整行 */
     }
 }
+
+/* 大语言模型音频聊天样式 */
+.chat-history {
+    height: 200px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    margin: 10px 0;
+    background-color: #fff;
+    border-radius: 4px;
+}
+
+.chat-message {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.chat-message.user {
+    background-color: #e3f2fd;
+    align-self: flex-end;
+    margin-left: auto;
+}
+
+.chat-message.assistant {
+    background-color: #f1f1f1;
+    align-self: flex-start;
+}
+
+.chat-message.processing {
+    font-style: italic;
+    color: #666;
+    background-color: #f9f9f9;
+}
+
+.chat-input {
+    display: flex;
+    margin-top: 10px;
+    gap: 5px;
+}
+
+.chat-input input {
+    flex-grow: 1;
+}
+
+.model-selection {
+    margin-bottom: 10px;
+}
+
+button.recording {
+    background-color: #dc3545;
+}
 #result,
 #trimVideoResult,
 #extractResult,
