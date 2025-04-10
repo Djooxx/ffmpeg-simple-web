@@ -4,13 +4,13 @@ let mediaRecorder;
 let audioChunks = [];
 let isRecording = false;
 let selectedModel = '';
-let chatHistory = [];
+let chatHistory = []; // 存储对话历史的数组，用于实现对话记忆功能
 let audioContext;
 let analyser;
 let silenceTimer = null;
 let isSpeaking = false;
 let audioStream = null;
-const SILENCE_THRESHOLD = 38; // 静音阈值
+const SILENCE_THRESHOLD = 30; // 静音阈值
 const SILENCE_DURATION = 1500; // 静音持续时间（毫秒）
 
 // 页面加载时获取可用的Ollama模型列表
@@ -29,6 +29,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const sendTextButton = document.getElementById('sendTextButton');
     if (sendTextButton) {
         sendTextButton.addEventListener('click', sendTextMessage);
+    }
+    
+    // 初始化清除聊天按钮事件
+    const clearChatButton = document.getElementById('clearChatButton');
+    if (clearChatButton) {
+        clearChatButton.addEventListener('click', clearChatHistory);
     }
 });
 
@@ -350,6 +356,17 @@ function chatWithOllama(message) {
     // 显示处理中的消息
     updateChatHistory('正在思考...', 'assistant-processing');
     
+    // 准备消息历史数据
+    // 将chatHistory数组转换为Ollama API所需的格式
+    const formattedMessages = chatHistory.map(item => {
+        // 将'user'和'assistant'角色映射到Ollama API所需的格式
+        const role = item.role === 'user' ? 'user' : 'assistant';
+        return {
+            role: role,
+            content: item.message
+        };
+    });
+    
     // 发送请求到服务器
     fetch('/chat_with_ollama', {
         method: 'POST',
@@ -358,7 +375,8 @@ function chatWithOllama(message) {
         },
         body: JSON.stringify({
             model: selectedModel,
-            message: message
+            message: message,
+            messages: formattedMessages
         })
     })
     .then(response => response.json())
@@ -370,6 +388,13 @@ function chatWithOllama(message) {
             // 显示模型回复
             const assistantText = data.response;
             updateChatHistory(assistantText, 'assistant');
+            
+            // 如果服务器返回了更新后的消息历史，则更新本地历史
+            if (data.messages) {
+                // 我们不直接替换chatHistory，因为updateChatHistory已经添加了最新的消息
+                // 这里只是记录一下服务器返回的完整历史，如果需要可以使用
+                console.log('服务器返回的消息历史:', data.messages);
+            }
             
             // 将回复转为语音
             textToSpeech(assistantText);
@@ -450,7 +475,26 @@ function updateChatHistory(message, role) {
     // 保存到聊天历史数组（除了处理中的消息）
     if (!role.includes('processing')) {
         chatHistory.push({ role, message });
+        console.log('聊天历史已更新，当前消息数:', chatHistory.length);
     }
+}
+
+// 清除聊天历史
+function clearChatHistory() {
+    // 清空聊天历史数组
+    chatHistory = [];
+    
+    // 清空聊天历史显示
+    const chatHistoryDiv = document.getElementById('chatHistory');
+    chatHistoryDiv.innerHTML = '';
+    
+    console.log('聊天历史已清除');
+    
+    // 显示提示消息
+    updateChatHistory('聊天历史已清除，开始新的对话吧！', 'system');
+    
+    // 系统消息不保存到历史中
+    chatHistory = [];
 }
 
 // 移除临时消息

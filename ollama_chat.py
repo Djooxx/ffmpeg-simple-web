@@ -100,13 +100,22 @@ def chat_with_ollama():
         data = request.json
         model_name = data.get('model', 'llama3')
         user_message = data.get('message', '')
+        messages_history = data.get('messages', [])
+        
+        # 如果没有提供历史消息，则创建只包含当前消息的列表
+        if not messages_history:
+            messages = [
+                {"role": "user", "content": user_message}
+            ]
+        else:
+            # 使用提供的历史消息列表，并添加当前消息
+            messages = messages_history.copy()
+            messages.append({"role": "user", "content": user_message})
         
         # 构建请求数据
         payload = {
             "model": model_name,
-            "messages": [
-                {"role": "user", "content": user_message}
-            ],
+            "messages": messages,
             "stream": False
         }
         
@@ -116,7 +125,15 @@ def chat_with_ollama():
         if response.status_code == 200:
             result = response.json()
             assistant_message = result.get('message', {}).get('content', '')
-            return jsonify({'success': True, 'response': assistant_message})
+            
+            # 将助手回复添加到消息历史中
+            messages.append({"role": "assistant", "content": assistant_message})
+            
+            return jsonify({
+                'success': True, 
+                'response': assistant_message,
+                'messages': messages  # 返回更新后的消息历史
+            })
         else:
             return jsonify({'success': False, 'error': f'模型响应失败: {response.text}'})
     except Exception as e:
