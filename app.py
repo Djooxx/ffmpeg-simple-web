@@ -226,7 +226,11 @@ def convert_video():
         output_path = video_path.rsplit('.', 1)[0] + f'_{timestamp}.{output_format}'
         cmd = [
             'ffmpeg',
+            '-hwaccel','cuda',
             '-i', video_path,
+            '-c:v', 'hevc_nvenc',
+            '-preset', 'fast',
+            '-c:a', 'copy',
             output_path
         ]
         result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
