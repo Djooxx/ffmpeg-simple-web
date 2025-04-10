@@ -357,8 +357,8 @@ def sense_voice():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'   
-device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'   
+#device = 'cpu'
 model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
 en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=model_v1_0)
 def en_callable(text):
@@ -381,15 +381,57 @@ def text_to_speech():
         # 返回音频数据
         timestamp = int(time.time())
         filename = f'audio_{voice}_{timestamp}.wav'
-        audio_buffer = BytesIO()
-        sf.write(audio_buffer, audio_data, 24000, format='WAV')
-        audio_buffer.seek(0)
-        return send_file(
-            audio_buffer,
-            mimetype='audio/wav',
-            as_attachment=True,
-            download_name=filename
-        )
+        
+        # 使用临时文件而不是内存缓冲区，避免大文件处理问题
+        temp_file_path = f'temp_audio_{timestamp}.wav'
+        sf.write(temp_file_path, audio_data, 24000, format='WAV')
+        
+        try:
+            # 使用send_file函数，它会自动处理文件传输和HTTP头
+            response = send_file(
+                temp_file_path,
+                mimetype='audio/wav',
+                as_attachment=True,
+                download_name=filename,
+                conditional=True
+            )
+            
+            # 设置响应头，确保浏览器正确处理
+            response.headers.set('Cache-Control', 'no-cache')
+            
+            # 添加一个定时清理任务，确保文件最终会被删除
+            def delayed_cleanup():
+                import threading
+                import time
+                
+                def _cleanup():
+                    # 等待5秒，确保文件传输完成
+                    time.sleep(5)
+                    if os.path.exists(temp_file_path):
+                        try:
+                            os.remove(temp_file_path)
+                            print(f"延迟清理临时文件成功: {temp_file_path}")
+                        except Exception as e:
+                            print(f"延迟清理临时文件失败: {e}")
+                
+                # 启动后台线程进行清理
+                cleanup_thread = threading.Thread(target=_cleanup)
+                cleanup_thread.daemon = True
+                cleanup_thread.start()
+            
+            # 启动延迟清理
+            delayed_cleanup()
+            
+            return response
+        finally:
+            # 如果在send_file之前发生异常，确保文件被删除
+            # 这不会影响正常的响应流程，因为在那种情况下文件会由上面的机制清理
+            if os.path.exists(temp_file_path) and 'response' not in locals():
+                try:
+                    os.remove(temp_file_path)
+                    print(f"异常处理中清理临时文件: {temp_file_path}")
+                except Exception as e:
+                    print(f"异常处理中清理临时文件失败: {e}")
     except Exception as e:
         print(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)})
@@ -401,11 +443,21 @@ def generate_audio_data(text, voice):
             pipeline = pipeline_v1_1
         else:
             pipeline = pipeline_v1_0
+        sentences = []
         # 处理text
-        # 分割模式
-        split_pattern = r'\n+|[。;；!！?？]|…|\.{2,}'
-        # 使用re.split()方法根据split_pattern分割文本
-        sentences = re.split(split_pattern, text)
+        if len(text) > 100:
+            # 分割模式
+            split_pattern = r'\n+|[。;；!！?？]|…|\.{2,}|\s+'
+            sentences_temp = re.split(split_pattern, text)
+            for sentence in sentences_temp:
+                if sentence and len(sentence) > 100:  # 如果句子长度超过限制
+                    # 再次按中英文逗号分割
+                    sub_sentences = re.split(r'[，,]', sentence)
+                    sentences.extend(sub_sentences)  # 将分割后的子句加入最终结果
+                else:
+                    sentences.append(sentence)  # 否则直接加入最终结果
+        else:
+            sentences = [text]
         # 创建结果列表，并确保过滤掉任何空字符串或仅包含空白字符的情况
         texts = [(sentence.strip(),) for sentence in sentences if sentence.strip()]
         # 打印结果
@@ -425,11 +477,11 @@ def generate_audio_data(text, voice):
         return wavs
 
 def speed_callable(len_ps):
-    speed = 0.8
-    if len_ps <= 83:
+    speed = 0.9
+    if len_ps <= 150:
         speed = 1
-    elif len_ps < 183:
-        speed = 1 - (len_ps - 83) / 500
+    elif len_ps < 250:
+        speed = 1 - (len_ps - 150) / 1000
     return speed * 1.1
 
 @app.route('/srt_to_audio', methods=['POST'])
