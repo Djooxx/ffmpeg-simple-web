@@ -5,6 +5,13 @@ let audioChunks = [];
 let isRecording = false;
 let selectedModel = '';
 let chatHistory = [];
+let audioContext;
+let analyser;
+let silenceTimer = null;
+let isSpeaking = false;
+let audioStream = null;
+const SILENCE_THRESHOLD = 38; // 静音阈值
+const SILENCE_DURATION = 1500; // 静音持续时间（毫秒）
 
 // 页面加载时获取可用的Ollama模型列表
 document.addEventListener('DOMContentLoaded', function() {
@@ -14,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 初始化录音按钮事件
     const recordButton = document.getElementById('recordButton');
     if (recordButton) {
+        recordButton.textContent = '开始对话';
         recordButton.addEventListener('click', toggleRecording);
     }
     
@@ -55,89 +63,263 @@ function fetchOllamaModels() {
         });
 }
 
-// 切换录音状态
+// 切换对话状态
 function toggleRecording() {
     const recordButton = document.getElementById('recordButton');
     
     if (!isRecording) {
-        // 开始录音
+        // 开始对话
         startRecording();
-        recordButton.textContent = '停止录音';
+        recordButton.textContent = '结束对话';
         recordButton.classList.add('recording');
     } else {
-        // 停止录音
+        // 结束对话
         stopRecording();
-        recordButton.textContent = '开始录音';
+        recordButton.textContent = '开始对话';
         recordButton.classList.remove('recording');
     }
     
     isRecording = !isRecording;
 }
 
-// 开始录音
+// 开始录音和语音监听
 function startRecording() {
     audioChunks = [];
     
     navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
-            mediaRecorder = new MediaRecorder(stream);
+            audioStream = stream;
+            
+            // 创建音频分析器
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            
+            // 配置分析器
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            // 创建录音机但不立即开始录音
+            mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
+            console.log('已创建MediaRecorder，初始状态:', mediaRecorder.state);
             
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     audioChunks.push(event.data);
+                    console.log('收到音频数据，当前块数:', audioChunks.length, '大小:', event.data.size, '字节');
                 }
             };
             
-            mediaRecorder.onstop = processRecording;
+            mediaRecorder.onstop = () => {
+                console.log('MediaRecorder.onstop事件触发，准备处理录音');
+                processRecording();
+            };
             
-            mediaRecorder.start();
+            // 不立即开始录音，而是等待检测到声音后再开始
+            // 开始监听音量
+            detectSpeech(dataArray);
         })
         .catch(error => {
             showError('无法访问麦克风: ' + error);
-        });
+        });}
+
+// 检测语音活动
+function detectSpeech(dataArray) {
+    if (!isRecording) return;
+    
+    // 获取音频数据
+    analyser.getByteFrequencyData(dataArray);
+    
+    // 计算平均音量
+    let sum = 0;
+    for(let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+    }
+    const average = sum / dataArray.length;
+    
+    // 检测是否有声音
+    if (average > SILENCE_THRESHOLD) {
+        // 有声音
+        if (!isSpeaking) {
+            isSpeaking = true;
+            console.log('检测到用户开始说话');
+            
+            // 如果录音机未启动，则开始录音
+            if (mediaRecorder && mediaRecorder.state === 'inactive') {
+                audioChunks = [];
+                mediaRecorder.start(1000); // 每1秒触发一次ondataavailable事件
+                console.log('检测到声音，开始录音，状态:', mediaRecorder.state);
+            } 
+            // 如果已经在录音但有之前的数据，重新开始录音
+            else if (mediaRecorder && mediaRecorder.state === 'recording' && audioChunks.length > 0) {
+                audioChunks = [];
+                mediaRecorder.stop();
+                setTimeout(() => {
+                    if (isRecording) {
+                        mediaRecorder.start(1000);
+                        console.log('重置录音，状态:', mediaRecorder.state);
+                    }
+                }, 100);
+            }
+        }
+        
+        // 清除静音计时器
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
+    } else if (isSpeaking) {
+        // 检测到静音，但之前在说话
+        if (!silenceTimer) {
+            console.log('检测到用户停止说话，开始计时');
+            silenceTimer = setTimeout(() => {
+                // 静音持续了指定时间，处理录音
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    // 确保在停止录音前已经收集到数据
+                    if (audioChunks.length === 0) {
+                        console.log('等待音频数据收集...');
+                        // 强制触发一次数据收集
+                        mediaRecorder.requestData();
+                        // 给一点时间让数据被收集
+                        setTimeout(() => {
+                            if (audioChunks.length > 0) {
+                                console.log('成功收集到音频数据，音频块数量:', audioChunks.length);
+                                try {
+                                    mediaRecorder.stop();
+                                    console.log('已停止录音，等待处理');
+                                } catch (e) {
+                                    console.error('停止录音时出错:', e);
+                                }
+                            } else {
+                                console.log('仍未收集到音频数据，放弃本次录音');
+                                // 重置录音状态，但不立即开始新录音
+                                try {
+                                    mediaRecorder.stop();
+                                } catch (e) {
+                                    console.error('停止录音时出错:', e);
+                                }
+                            }
+                        }, 500);
+                    } else {
+                        console.log('检测到静音2秒，自动处理录音');
+                        console.log('当前录音状态:', mediaRecorder.state);
+                        console.log('音频块数量:', audioChunks.length);
+                        // 确保在这里停止录音，这将触发onstop事件并调用processRecording
+                        try {
+                            mediaRecorder.stop();
+                            console.log('已停止录音，等待处理');
+                        } catch (e) {
+                            console.error('停止录音时出错:', e);
+                        }
+                        // processRecording会通过onstop事件自动调用
+                    }
+                }
+                isSpeaking = false;
+                silenceTimer = null;
+                console.log('静音计时器已重置，准备下一次录音');
+            }, SILENCE_DURATION);
+        }
+    }
+    
+    // 继续检测
+    if (isRecording) {
+        requestAnimationFrame(() => detectSpeech(dataArray));
+    }
 }
 
-// 停止录音
+// 停止录音和语音监听
 function stopRecording() {
+    // 停止录音
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
     }
+    
+    // 清除静音计时器
+    if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+    }
+    
+    // 停止音频分析
+    if (audioContext) {
+        audioContext.close().catch(e => console.error('关闭音频上下文失败:', e));
+        audioContext = null;
+        analyser = null;
+    }
+    
+    // 停止音频流
+    if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+    }
+    
+    isSpeaking = false;
 }
 
 // 处理录音结果
 function processRecording() {
+    console.log('进入processRecording函数，准备处理录音');
+    console.log('当前audioChunks长度:', audioChunks.length);
+    
     // 显示处理中的消息
     updateChatHistory('正在处理您的语音...', 'user-processing');
     
+    if (audioChunks.length === 0) {
+        console.log('警告：audioChunks为空，没有录音数据可处理');
+        showError('没有录音数据');
+        removeTempMessages();
+        return;
+    }
+    
     // 创建音频Blob
     const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+    console.log('已创建音频Blob，大小:', audioBlob.size, '字节');
     
     // 创建FormData对象
     const formData = new FormData();
     formData.append('audio', audioBlob);
+    
+    console.log('准备发送请求到/audio_to_text_for_chat');
+    
+    // 清空录音数据，准备下一次录音
+    audioChunks = [];
     
     // 发送到服务器进行语音识别
     fetch('/audio_to_text_for_chat', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('收到服务器响应，状态码:', response.status);
+        return response.json();
+    })
     .then(data => {
+        console.log('解析响应数据:', data);
         if (data.success) {
             // 移除处理中的消息
             removeTempMessages();
             
             // 显示识别出的文字
             const userText = data.text;
-            updateChatHistory(userText, 'user');
-            
-            // 发送文字到Ollama进行对话
-            chatWithOllama(userText);
+            console.log('语音识别成功，文本:', userText);
+            if (userText.trim()) {
+                updateChatHistory(userText, 'user');
+                
+                // 发送文字到Ollama进行对话
+                console.log('准备发送文本到Ollama进行对话');
+                chatWithOllama(userText);
+            } else {
+                console.log('识别结果为空，不发送到Ollama');
+            }
         } else {
+            console.error('语音识别失败:', data.error);
             showError('语音识别失败: ' + data.error);
         }
     })
     .catch(error => {
+        console.error('请求失败:', error);
         showError('请求失败: ' + error);
     });
 }

@@ -357,7 +357,8 @@ def sense_voice():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'   
+# device = 'cuda' if torch.cuda.is_available() else 'cpu'   
+device = 'cpu'
 model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
 en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=model_v1_0)
 def en_callable(text):
