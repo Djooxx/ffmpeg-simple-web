@@ -452,7 +452,7 @@ def generate_audio_data(text, voice):
         # 处理text
         if len(text) > 100:
             # 分割模式
-            split_pattern = r'([。;；!！?？]|…|\.{2,}|\s+'
+            split_pattern = r'([。;；!！?？]|…|\.{2,}|\s+)'
             sentences_temp = re.split(split_pattern, text)
             for sentence in sentences_temp:
                 if sentence and len(sentence) > 100:  # 如果句子长度超过限制
@@ -463,10 +463,17 @@ def generate_audio_data(text, voice):
                     sentences.append(sentence)  # 否则直接加入最终结果
         else:
             sentences = [text]
-        # 创建结果列表，并确保过滤掉任何空字符串或仅包含空白字符的情况
-        texts = [(sentence.strip(),) for sentence in sentences if sentence.strip()]
+        # 创建结果列表，并确保过滤掉任何空字符串、仅包含空白字符或仅包含标点符号的情况
+        # 使用正则表达式检查是否只包含标点符号
+        punctuation_pattern = r'^[\s。;；!！?？….,，、\-]+$'
+        texts = [(sentence.strip(),) for sentence in sentences if sentence.strip() and not re.match(punctuation_pattern, sentence.strip())]
         # 打印结果
         print(texts)
+        # 检查texts是否为空，如果为空则直接返回空列表
+        if not texts:
+            print("没有有效文本内容，跳过音频生成")
+            return wavs
+            
         for paragraph in tqdm.tqdm(texts):
             for i, sentence in enumerate(paragraph):
                 print("处理文字: " + sentence)
