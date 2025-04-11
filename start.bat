@@ -29,4 +29,4 @@ if %errorlevel% equ 0 (
 
 :: 运行应用
 echo 启动应用...
-python app.py
+waitress-serve --listen=0.0.0.0:5000 app:app
