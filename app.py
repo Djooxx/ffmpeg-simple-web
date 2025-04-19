@@ -59,8 +59,30 @@ def get_video_info():
                 video_info = json.loads(result.stdout)
                 # 转换文件大小
                 if 'format' in video_info and 'size' in video_info['format']:
-                    size_bytes = int(video_info['format']['size'])
-                    video_info['format']['size'] = convert_size(size_bytes)
+                    try:
+                        size_bytes = int(video_info['format']['size'])
+                        if size_bytes > 0:
+                            video_info['format']['size'] = convert_size(size_bytes)
+                        else:
+                            print("size字段无效或为负数: " + str(size_bytes))
+                            # 用os.path.getsize补充获取文件大小
+                            try:
+                                actual_size = os.path.getsize(video_path)
+                                print("用os.path.getsize获取到的文件大小: " + str(actual_size))
+                                video_info['format']['size'] = convert_size(actual_size)
+                            except Exception as os_exc:
+                                print("os.path.getsize异常: " + str(os_exc))
+                                video_info['format']['size'] = "无效文件大小"
+                    except Exception as size_exc:
+                        print("size字段解析异常: " + str(size_exc))
+                        # 用os.path.getsize补充获取文件大小
+                        try:
+                            actual_size = os.path.getsize(video_path)
+                            print("用os.path.getsize获取到的文件大小: " + str(actual_size))
+                            video_info['format']['size'] = convert_size(actual_size)
+                        except Exception as os_exc:
+                            print("os.path.getsize异常: " + str(os_exc))
+                            video_info['format']['size'] = "文件大小解析错误"
                 return jsonify({'success': True, 'data': video_info})
             except json.JSONDecodeError as e:
                 print("JSON解析错误:", e)
