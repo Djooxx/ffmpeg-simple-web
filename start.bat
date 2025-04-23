@@ -21,7 +21,7 @@ if exist "requirements.txt" (
 where nvidia-smi >nul 2>&1
 if %errorlevel% equ 0 (
     echo 检测到NVIDIA显卡，安装CUDA版本...
-	pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
+	pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ) else (
     echo 无NVIDIA显卡，直接安装CPU版本...
     pip install torch==2.3 torchaudio==2.3
