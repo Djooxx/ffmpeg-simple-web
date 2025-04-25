@@ -181,6 +181,56 @@ def trim_audio():
         print(f"发生异常: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
+# 获取视频分辨率
+def get_video_resolution(video_path):
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height',
+            '-of', 'json',
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(result.stdout)
+        width = data['streams'][0]['width']
+        height = data['streams'][0]['height']
+        return width, height
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
+        print(f"无法获取 {video_path} 的分辨率，默认使用 5M 比特率")
+        return 1920, 1080  # 默认 1080p
+
+def get_target_video_bitrate(video_path):
+    """
+    根据视频分辨率返回目标比特率。
+    
+    参数:
+        video_path (str): 输入视频文件路径
+        
+    返回:
+        str: 比特率字符串，例如 '15M'、'5M'、'3M'
+        
+    默认规则:
+        - 4K (≥3840x2160): 15Mbps
+        - 1080p (≥1920x1080): 5Mbps
+        - 720p 或更低: 3Mbps
+    """
+    try:
+        # 获取视频分辨率
+        width, height = get_video_resolution(video_path)
+        # 根据分辨率设置比特率
+        if width >= 3840 or height >= 2160:  # 4K
+            return '15M'
+        elif width >= 1920 or height >= 1080:  # 1080p
+            return '5M'
+        else:  # 720p 或更低
+            return '3M'
+    
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
+        print(f"无法获取 {video_path} 的分辨率，错误: {e}，默认使用 5M 比特率")
+        return '5M'  # 默认比特率
+
 @app.route('/trim_video', methods=['POST'])
 def trim_video():
     print("收到截取视频请求")
@@ -210,18 +260,21 @@ def trim_video():
             
         output_path = video_path.rsplit('.', 1)[0] + f'_{start_time}s-{end_time}s_{timestamp}.{input_ext}'
         duration = float(end_time) - float(start_time)
+        bitrate = get_target_video_bitrate(video_path)
+        # 构建 FFmpeg 命令
         cmd = [
             'ffmpeg',
-            '-ss', str(start_time),   # 初步快速定位（关键帧对齐）
+            '-hwaccel', 'cuda',       # 启用 GPU 解码
+            '-ss', str(start_time),   # 快速定位到起始时间
             '-i', video_path,
-            '-ss', '0',               # 精确微调（从已定位的位置开始逐帧解码）
-            '-t', str(duration),
+            '-t', str(duration),      # 截取时长
+            '-c:v', 'hevc_nvenc',     # H.265 硬件编码
+            '-preset', 'p5',          # NVENC 预设
+            '-rc', 'vbr',             # 可变比特率
+            '-b:v', bitrate,          # 动态比特率
+            '-c:a', 'copy',           # 音频直接复制
+            output_path
         ]
-        if start_time > 0:
-            cmd.extend(['-c:v', 'hevc_nvenc', '-b:v', '5M'])  # 添加硬件编码和比特率设置
-        else:
-            cmd.extend(['-c:v', 'copy'])
-        cmd.extend(['-c:a', 'copy', output_path])
         print(f"准备执行命令: {cmd}")
         result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         print(f"命令执行完成，返回码: {result.returncode}")
@@ -246,19 +299,24 @@ def convert_video():
     try:
         timestamp = int(time.time())
         output_path = video_path.rsplit('.', 1)[0] + f'_{timestamp}.{output_format}'
+        bitrate = get_target_video_bitrate(video_path)
         cmd = [
             'ffmpeg',
             '-hwaccel','cuda',
             '-i', video_path,
-            '-c:v', 'hevc_nvenc',
-            '-preset', 'fast',
-            '-c:a', 'copy',
+            '-c:v', 'hevc_nvenc',     # H.265 硬件编码
+            '-preset', 'p5',          # NVENC 预设
+            '-rc', 'vbr',             # 可变比特率
+            '-b:v', bitrate,          # 动态比特率
+            '-c:a', 'copy',           # 音频直接复制
             output_path
         ]
+        print(f"准备执行命令: {cmd}")
         result = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         if result.returncode == 0:
             return jsonify({'success': True, 'output_path': output_path})
         else:
+            print(f"视频转换失败，错误信息: {result.stderr}")
             return jsonify({'success': False, 'error': result.stderr})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
