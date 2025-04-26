@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 初始化录音按钮事件
     const recordButton = document.getElementById('recordButton');
     if (recordButton) {
-        recordButton.textContent = '开始对话';
+        recordButton.textContent = '语音';
         recordButton.addEventListener('click', toggleRecording);
     }
     
@@ -29,6 +29,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const sendTextButton = document.getElementById('sendTextButton');
     if (sendTextButton) {
         sendTextButton.addEventListener('click', sendTextMessage);
+    }
+    
+    // 初始化文本输入框回车事件
+    const chatTextInput = document.getElementById('chatTextInput');
+    if (chatTextInput) {
+        chatTextInput.addEventListener('keydown', function(event) {
+            // 检查是否按下了回车键 (keyCode 13) 并且没有按下 Shift 键
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // 阻止默认的回车行为（例如换行）
+                sendTextMessage(); // 调用发送消息函数
+            }
+        });
     }
     
     // 初始化清除聊天按钮事件
@@ -76,12 +88,12 @@ function toggleRecording() {
     if (!isRecording) {
         // 开始对话
         startRecording();
-        recordButton.textContent = '结束对话';
+        recordButton.textContent = '结束';
         recordButton.classList.add('recording');
     } else {
         // 结束对话
         stopRecording();
-        recordButton.textContent = '开始对话';
+        recordButton.textContent = '语音';
         recordButton.classList.remove('recording');
     }
     
