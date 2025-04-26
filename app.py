@@ -533,7 +533,7 @@ def generate_audio_data(text, voice):
         # 处理text
         if len(text) > 100:
             # 分割模式
-            split_pattern = r'([。;；!！?？]|…|\.{2,}|\s+)'
+            split_pattern = r'([。;；!！?？]|…|\.{2,})'
             sentences_temp = re.split(split_pattern, text)
             for sentence in sentences_temp:
                 if sentence and len(sentence) > 100:  # 如果句子长度超过限制
