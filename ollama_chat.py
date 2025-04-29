@@ -101,7 +101,7 @@ def audio_to_text_for_chat():
 def chat_with_ollama():
     try:
         data = request.json
-        model_name = data.get('model', 'llama3')
+        model_name = data.get('model', 'qwen3:14b')
         user_message = data.get('message', '')
         messages_history = data.get('messages', [])
         
@@ -184,112 +184,168 @@ def execute_sql(sql_query):
     """执行 SQL 查询并返回结果"""
     conn = None
     cursor = None
+    print(f"--- Executing SQL ---\n{sql_query}\n---------------------") # 添加日志：打印 SQL
     try:
         conn = get_db_connection()
         if conn is None:
-            return False, "无法获取数据库连接"
+            error_msg = "无法获取数据库连接"
+            print(f"SQL Error: {error_msg}") # 添加日志：打印错误
+            return False, error_msg
         cursor = conn.cursor(dictionary=True) # 使用字典游标
         cursor.execute(sql_query)
-        if sql_query.strip().upper().startswith("SELECT") or \
-           sql_query.strip().upper().startswith("SHOW") or \
-           sql_query.strip().upper().startswith("DESC"):
+        if sql_query.strip().upper().startswith(("SELECT", "SHOW", "DESC")):
             result = cursor.fetchall()
-            return True, json.dumps(result, ensure_ascii=False) # 返回 JSON 字符串
+            # 尝试将结果转换为 JSON 字符串，处理 datetime 等特殊类型
+            try:
+                result_json = json.dumps(result, ensure_ascii=False, default=str) # 使用 default=str 处理无法序列化的类型
+            except TypeError as e:
+                print(f"JSON 序列化错误: {e}, 将返回原始结果列表")
+                result_json = str(result) # 如果序列化失败，返回原始列表的字符串表示
+            print(f"SQL Result (JSON): {result_json}") # 添加日志：打印 JSON 结果
+            return True, result_json
         else:
             conn.commit()
-            return True, f"操作成功，影响行数: {cursor.rowcount}"
+            result_message = f"操作成功，影响行数: {cursor.rowcount}"
+            print(f"SQL Result: {result_message}") # 添加日志：打印操作结果
+            return True, result_message
     except mysql.connector.Error as err:
-        print(f"SQL 执行错误: {err}")
-        return False, f"SQL 执行错误: {err}"
-    finally:
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close() # 将连接放回池中
-
-def get_tables():
-    """获取数据库中的所有表名"""
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return False, "无法获取数据库连接"
-        cursor = conn.cursor()
-        # 尝试获取当前连接的数据库名称
-        cursor.execute("SELECT DATABASE()")
-        current_db = cursor.fetchone()
-        if not current_db or not current_db[0]:
-            return False, "未选择数据库。请在 DB_CONFIG 中指定 'database' 或在连接后使用 'USE database_name;'"
-        db_name = current_db[0]
-        print(f"当前数据库: {db_name}")
-        
-        # 获取该数据库的表
-        cursor.execute("SHOW TABLES")
-        tables = [table[0] for table in cursor.fetchall()]
-        return True, tables
-    except mysql.connector.Error as err:
-        print(f"获取表列表错误: {err}")
-        return False, f"获取表列表错误: {err}"
+        error_msg = f"SQL 执行错误: {err}"
+        print(f"SQL Error: {error_msg}") # 添加日志：打印 SQL 错误
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"执行 SQL 时发生意外错误: {e}"
+        print(f"SQL Error: {error_msg}") # 添加日志：打印其他错误
+        print(traceback.format_exc()) # 打印详细堆栈信息
+        return False, error_msg
     finally:
         if cursor:
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
 
-def get_columns(table_name):
-    """获取指定表的列信息"""
+def get_tables():
+    """获取数据库中的所有表名"""
+    print("--- Calling get_tables() ---") # 添加日志：函数入口
     conn = None
     cursor = None
     try:
         conn = get_db_connection()
         if conn is None:
-            return False, "无法获取数据库连接"
+            error_msg = "无法获取数据库连接"
+            print(f"get_tables Error: {error_msg}") # 添加日志：错误
+            return False, error_msg
+        cursor = conn.cursor()
+        # 尝试获取当前连接的数据库名称
+        cursor.execute("SELECT DATABASE()")
+        current_db = cursor.fetchone()
+        if not current_db or not current_db[0]:
+            error_msg = "未选择数据库。请在 DB_CONFIG 中指定 'database' 或在连接后使用 'USE database_name;'"
+            print(f"get_tables Error: {error_msg}") # 添加日志：错误
+            return False, error_msg
+        db_name = current_db[0]
+        print(f"当前数据库: {db_name}")
+
+        # 获取该数据库的表
+        cursor.execute("SHOW TABLES")
+        tables = [table[0] for table in cursor.fetchall()]
+        print(f"get_tables Success: Found tables: {tables}") # 添加日志：成功
+        return True, tables
+    except mysql.connector.Error as err:
+        error_msg = f"获取表列表错误: {err}"
+        print(f"get_tables Error: {error_msg}") # 添加日志：SQL 错误
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"获取表列表时发生意外错误: {e}"
+        print(f"get_tables Error: {error_msg}") # 添加日志：其他错误
+        print(traceback.format_exc())
+        return False, error_msg
+    finally:
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
+        print("--- Exiting get_tables() ---") # 添加日志：函数出口
+
+def get_columns(table_name):
+    """获取指定表的列信息"""
+    print(f"--- Calling get_columns(table_name='{table_name}') ---") # 添加日志：函数入口和参数
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            error_msg = "无法获取数据库连接"
+            print(f"get_columns Error for table '{table_name}': {error_msg}") # 添加日志：错误
+            return False, error_msg
         cursor = conn.cursor()
         # 检查表是否存在以及获取列信息
         # 使用 DESCRIBE 语句，更通用
         cursor.execute(f"DESCRIBE `{table_name}`") # 使用反引号处理特殊表名
         columns = [column[0] for column in cursor.fetchall()]
         if not columns:
-             return False, f"表 '{table_name}' 不存在或没有列"
+             error_msg = f"表 '{table_name}' 不存在或没有列"
+             print(f"get_columns Warning for table '{table_name}': {error_msg}") # 添加日志：警告/未找到
+             return False, error_msg
+        print(f"get_columns Success for table '{table_name}': Found columns: {columns}") # 添加日志：成功
         return True, columns
     except mysql.connector.Error as err:
-        print(f"获取列信息错误 for table {table_name}: {err}")
+        error_msg = f"获取列信息错误: {err}"
+        print(f"get_columns Error for table '{table_name}': {error_msg}") # 添加日志：SQL 错误
         # 检查是否是表不存在的错误
         if err.errno == mysql.connector.errorcode.ER_NO_SUCH_TABLE:
              return False, f"表 '{table_name}' 不存在"
         return False, f"获取列信息错误: {err}"
+    except Exception as e:
+        error_msg = f"获取列信息时发生意外错误: {e}"
+        print(f"get_columns Error for table '{table_name}': {error_msg}") # 添加日志：其他错误
+        print(traceback.format_exc())
+        return False, error_msg
     finally:
         if cursor:
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
+        print(f"--- Exiting get_columns(table_name='{table_name}') ---") # 添加日志：函数出口
 
 def get_create_table_statement(table_name):
     """获取指定表的 CREATE TABLE 语句"""
+    print(f"--- Calling get_create_table_statement(table_name='{table_name}') ---") # 添加日志：函数入口和参数
     conn = None
     cursor = None
     try:
         conn = get_db_connection()
         if conn is None:
-            return False, "无法获取数据库连接"
+            error_msg = "无法获取数据库连接"
+            print(f"get_create_table_statement Error for table '{table_name}': {error_msg}") # 添加日志：错误
+            return False, error_msg
         cursor = conn.cursor()
         cursor.execute(f"SHOW CREATE TABLE `{table_name}`")
         result = cursor.fetchone()
         if result:
-            return True, result[1] # CREATE TABLE 语句在第二个位置
+            create_statement = result[1]
+            print(f"get_create_table_statement Success for table '{table_name}'") # 添加日志：成功
+            return True, create_statement # CREATE TABLE 语句在第二个位置
         else:
-            return False, f"无法获取表 '{table_name}' 的 CREATE TABLE 语句"
+            error_msg = f"无法获取表 '{table_name}' 的 CREATE TABLE 语句"
+            print(f"get_create_table_statement Warning for table '{table_name}': {error_msg}") # 添加日志：警告/未找到
+            return False, error_msg
     except mysql.connector.Error as err:
-        print(f"获取 CREATE TABLE 语句错误 for table {table_name}: {err}")
+        error_msg = f"获取 CREATE TABLE 语句错误: {err}"
+        print(f"get_create_table_statement Error for table '{table_name}': {error_msg}") # 添加日志：SQL 错误
         if err.errno == mysql.connector.errorcode.ER_NO_SUCH_TABLE:
              return False, f"表 '{table_name}' 不存在"
         return False, f"获取 CREATE TABLE 语句错误: {err}"
+    except Exception as e:
+        error_msg = f"获取 CREATE TABLE 语句时发生意外错误: {e}"
+        print(f"get_create_table_statement Error for table '{table_name}': {error_msg}") # 添加日志：其他错误
+        print(traceback.format_exc())
+        return False, error_msg
     finally:
         if cursor:
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
+        print(f"--- Exiting get_create_table_statement(table_name='{table_name}') ---") # 添加日志：函数出口
 
 @ollama_chat_bp.route('/nl_to_sql', methods=['POST'])
 def nl_to_sql():
@@ -299,7 +355,7 @@ def nl_to_sql():
     model_name = data.get('model', 'qwen3:14b') # 可以让前端选择模型
     print(f"使用模型: {model_name}")
 
-    max_retries = 5 # 防止无限循环
+    max_retries = 50 # 防止无限循环
     retries = 0
     messages = [
         {"role": "system", "content": SQL_SYSTEM_PROMPT},
@@ -342,9 +398,8 @@ def nl_to_sql():
                  messages.append({"role": "user", "content": json.dumps(error_message_to_model)})
                  continue # 继续循环，让模型重试
 
-            # 将模型的原始回复（清理前）添加到历史记录中，以便进行下一轮对话
-            # 注意：这里仍然添加原始字符串，因为模型可能需要完整的上下文
-            messages.append({"role": "assistant", "content": ollama_response_str})
+            # 将模型的原始回复（清理后）添加到历史记录中，以便进行下一轮对话
+            messages.append({"role": "assistant", "content": cleaned_response_str})
 
             # 处理 Ollama 的响应 (使用解析后的 ollama_response)
             if 'action' in ollama_response:
@@ -392,25 +447,8 @@ def nl_to_sql():
             elif 'answer' in ollama_response:
                 # 模型生成了最终答案
                 final_answer = ollama_response['answer']
-                print(f"Final Answer: {final_answer}")
+                print(f"处理结果: {final_answer}")
                 return jsonify({'success': True, 'answer': final_answer})
-            
-            elif 'ready' in ollama_response and ollama_response['ready'] is True:
-                # 这是初始的 ready 确认，忽略并继续发送第一个用户问题
-                # （理论上第一次调用后不会再收到这个，但以防万一）
-                print("Received ready confirmation, proceeding with question.")
-                # 确保用户问题仍在消息列表中
-                if len(messages) == 2 and messages[1]['role'] == 'user':
-                    # 第一次交互，模型返回 ready，我们继续
-                    pass
-                else:
-                    # 意外情况，重新开始
-                    messages = [
-                        {"role": "system", "content": SQL_SYSTEM_PROMPT},
-                        {"role": "user", "content": json.dumps({"question": user_question})}
-                    ]
-                continue
-
             else:
                 # 模型返回了未知格式的 JSON
                 print(f"错误：Ollama 返回了无法处理的 JSON 格式: {ollama_response_str}")
@@ -436,7 +474,7 @@ DB_CONFIG = {
     'port': 9981,
     'user': 'root',
     'password': '1234qwer',
-    'database': 'test1', # 数据库名称，如果需要指定
+    'database': 'employees', # 数据库名称，如果需要指定
     'raise_on_warnings': True
 }
 
@@ -571,12 +609,4 @@ SQL_SYSTEM_PROMPT = """# 角色与目标
 *   你的**所有**响应**必须**是 JSON 格式。
 *   **绝对不允许**在 JSON 对象之外包含任何字符、引导性文字、结束语、解释、道歉或任何其他字符。你的输出必须**仅**是定义的几种 JSON 格式之一 (`{"action": ...}`, `{"sql": ...}`, 或 `{"answer": ...}`)。
 
-# 确认
-如果你已完全理解以上所有指令、规则和新增的 Schema 查询能力，并准备好开始接收用户请求，请**仅**返回以下 JSON 对象，不包含任何其他内容：
-```json
-{
-    "ready": true
-}
-```
 """
-

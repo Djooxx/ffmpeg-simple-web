@@ -162,12 +162,49 @@ button.recording {
 #fasterWhisperResult,
 #textToSpeechResult,
 #srtToSpeechResult,
-#trimResult {
+#trimResult,
+#nlToSqlResult {
     margin-top: 10px;
     padding: 10px;
     background-color: #e9f5ff;
     border: 1px solid #b3d9ff;
     border-radius: 4px;
+}
+
+/* 自然语言查数据库样式 */
+#nlToSqlForm {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: #f0f8ff;
+    border: 1px solid #a6d7ff;
+    border-radius: 8px;
+}
+
+#nlQueryInput {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    margin-bottom: 15px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 60px;
+    transition: border-color 0.3s ease;
+}
+
+#nlToSqlForm button[type="submit"] {
+    background-color: #28a745;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#nlToSqlForm button[type="submit"]:hover {
+    background-color: #218838;
 }
 .time-inputs {
     margin: 10px 0;
