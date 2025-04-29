@@ -387,6 +387,16 @@
                 <a id="chatDownloadLink" style="display: block; margin-top: 15px; margin-left: 15px;">下载</a>
             </div>
         </div>
+
+        <div>
+            <h2>自然语言查数据库</h2>
+            <form id="nlToSqlForm">
+                <label for="nlQueryInput">输入你的问题:</label>
+                <textarea id="nlQueryInput" name="query" required style="width: 90%; max-width: 100%; min-height: 50px;"></textarea>
+                <button type="submit">查询</button>
+            </form>
+            <div id="nlToSqlResult"></div>
+        </div>
     </div>
 
     <script>
@@ -804,6 +814,34 @@
                 srtProgressBar.value = 0; 
             });
         })
+
+        // 自然语言查数据库
+        document.getElementById('nlToSqlForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const query = document.getElementById('nlQueryInput').value;
+            const resultDiv = document.getElementById('nlToSqlResult');
+            resultDiv.innerHTML = '<p>正在处理，请稍候...</p>'; // 显示加载状态
+
+            fetch('/nl_to_sql', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ question: query })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 将结果格式化显示，保留换行和空格
+                    resultDiv.innerHTML = `<pre>${data.answer}</pre>`;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">错误: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                resultDiv.innerHTML = `<p class="error">请求失败: ${error}</p>`;
+            });
+        });
     </script>
 
     <!-- 大语言模型音频聊天功能的脚本 -->
