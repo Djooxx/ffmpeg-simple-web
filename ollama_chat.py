@@ -370,11 +370,12 @@ def nl_to_sql():
                 "model": model_name,
                 "messages": messages,
                 "stream": False,
-                "format": "json" # 请求 JSON 输出
+                "response_format": {"type": "json_object"},
             }
+            print("messages:\n", json.dumps(messages, indent=2, ensure_ascii=False))
             response = requests.post(f"{OLLAMA_API_URL}/chat", json=payload)
             response.raise_for_status() # 检查 HTTP 错误
-
+            print(f"Ollama API Response text ({retries}): {response.text}")
             ollama_response_str = response.json().get('message', {}).get('content', '')
             print(f"Ollama Raw Response ({retries}): {ollama_response_str}")
 
