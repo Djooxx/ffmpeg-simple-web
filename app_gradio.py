@@ -22,6 +22,9 @@ import tqdm
 import mysql.connector # 添加 MySQL 连接器
 import mysql.connector.pooling # 添加连接池支持
 import traceback
+from yt_dlp import YoutubeDL
+import tempfile
+from urllib.parse import urlparse, urlunparse
 # 假设Kokoro相关库已安装
 from kokoro import KModel, KPipeline  # 需确认实际导入方式
 
@@ -31,15 +34,15 @@ os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 logger = logging.getLogger(__name__)
 logger.propagate = False  # 关键：关闭继承传播
 logger.setLevel(logging.DEBUG)
- 
+
 # 创建一个handler，用于将日志消息打印到控制台
 handler = logging.StreamHandler()
 handler.setLevel(logging.INFO)
- 
+
 # 创建一个formatter，然后添加到handler中
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
- 
+
 # 将handler添加到logger中
 
 logger.addHandler(handler)
@@ -214,13 +217,13 @@ def trim_video(video_path: str, start_time: float, end_time: float) -> str:
     bitrate = get_target_video_bitrate(video_path)
     try:
         stream = ffmpeg.input(
-                    video_path, 
-                    ss=start_time, 
+                    video_path,
+                    ss=start_time,
                     t=end_time - start_time,
                     hwaccel="cuda"
                 )
         stream = ffmpeg.output(
-                    stream, 
+                    stream,
                     output_path,
                     vcodec="hevc_nvenc",    # 视频编码器改为 NVENC H.265
                     preset="p5",            # 编码预设
@@ -237,13 +240,13 @@ def trim_video(video_path: str, start_time: float, end_time: float) -> str:
 def get_target_video_bitrate(video_path):
     """
     根据视频分辨率返回目标比特率。
-    
+
     参数:
         video_path (str): 输入视频文件路径
-        
+
     返回:
         str: 比特率字符串，例如 '15M'、'5M'、'3M'
-        
+
     默认规则:
         - 4K (≥3840x2160): 15Mbps
         - 1080p (≥1920x1080): 5Mbps
@@ -259,7 +262,7 @@ def get_target_video_bitrate(video_path):
             return '5M'
         else:  # 720p 或更低
             return '3M'
-    
+
     except (json.JSONDecodeError, KeyError) as e:
         print(f"无法获取 {video_path} 的分辨率，错误: {e}，默认使用 5M 比特率")
         return '5M'  # 默认比特率
@@ -275,7 +278,7 @@ def get_video_resolution(video_path):
             show_entries='stream=width,height',  # 提取宽高字段
             of='json'  # 输出JSON格式
         )
-        
+
         # 解析流信息（保持与原逻辑一致）
         width = probe['streams'][0]['width']
         height = probe['streams'][0]['height']
@@ -361,10 +364,10 @@ def convert_video(video_path: str, output_format: str) -> str:
         stream = ffmpeg.output(
             stream,
             output_path,
-            vcodec='hevc_nvenc',    # 使用 NVIDIA HEVC 编码器 
-            preset='p5',            # NVENC 预设 
-            video_bitrate=bitrate,  # 设置视频比特率，对应 -b:v 
-            rc='vbr',               # 可变比特率模式，对应 -rc vbr 
+            vcodec='hevc_nvenc',    # 使用 NVIDIA HEVC 编码器
+            preset='p5',            # NVENC 预设
+            video_bitrate=bitrate,  # 设置视频比特率，对应 -b:v
+            rc='vbr',               # 可变比特率模式，对应 -rc vbr
             acodec='copy',          # 复制音频流
         )
 
@@ -418,13 +421,147 @@ def faster_whisper(audio_path: str) -> str:
     except Exception as e:
         return f"错误: {str(e)}"
 
+def clean_bilibili_url(video_url):
+    # 判断是否为 B 站链接
+    if "bilibili.com" not in video_url:
+        return video_url
+
+    # 解析 URL 结构
+    parsed = urlparse(video_url)
+    # 重构 URL：将 query（参数）和 fragment（锚点）置空
+    cleaned_url = urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        "",  # 删除所有查询参数
+        ""   # 可选：删除锚点（若需要保留锚点则保留 parsed.fragment）
+    ))
+    return cleaned_url
+
+# 总结视频内容
+def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tuple[str, Tuple[int, np.ndarray], gr.update]:
+    try:
+        if not video_url.strip():
+            return "", (0, np.array([])), gr.update(value="错误: 请输入视频URL", visible=True)
+        if not ollama_model:
+            return "", (0, np.array([])), gr.update(value="错误: 请选择Ollama模型", visible=True)
+        if not tts_voice:
+            return "", (0, np.array([])), gr.update(value="错误: 请选择TTS语音", visible=True)
+
+        logger.info(f"开始总结视频URL: {video_url} 使用模型: {ollama_model} 和语音: {tts_voice}")
+
+        video_url = clean_bilibili_url(video_url)
+        logger.info(f"清理后的视频URL: {video_url}")
+
+        # 1. 下载音频
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': os.path.join(tmpdir, '%(title)s.%(ext)s'),
+                'keepvideo': False,
+                'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
+            }
+            downloaded_audio_path = None
+            with YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info_dict = ydl.extract_info(video_url, download=True)
+                    # ydl.download([video_url]) # extract_info with download=True already downloads
+                    # 获取下载的文件路径
+                    # filename = ydl.prepare_filename(info_dict) # This gives the template
+                    # Actual filename is based on outtmpl and info_dict
+                    # A bit hacky, assumes one file downloaded into tmpdir
+                    downloaded_files = os.listdir(tmpdir)
+                    if not downloaded_files:
+                        logger.error("yt_dlp 未能下载任何文件")
+                        return "", (0, np.array([])), gr.update(value="错误: 无法从URL下载音频 (无文件)", visible=True)
+                    downloaded_audio_path = os.path.join(tmpdir, downloaded_files[0])
+                    logger.info(f"音频已下载到: {downloaded_audio_path}")
+                except Exception as e:
+                    logger.error(f"yt_dlp 下载错误: {str(e)}")
+                    return "", (0, np.array([])), gr.update(value=f"错误: 无法从URL下载音频: {str(e)}", visible=True)
+
+            if not downloaded_audio_path or not os.path.exists(downloaded_audio_path):
+                logger.error("下载的音频文件路径无效或文件不存在")
+                return "", (0, np.array([])), gr.update(value="错误: 下载的音频文件处理失败", visible=True)
+
+            # 2. 音频转文字 (SenseVoiceSmall)
+            logger.info(f"开始使用SenseVoice进行语音转文字: {downloaded_audio_path}")
+            sense_voice_result_str = sense_voice(downloaded_audio_path)
+            logger.info(f"SenseVoice 结果: {sense_voice_result_str}")
+
+            # 从结果字符串中提取文本
+            transcribed_text = ""
+            if "错误:" in sense_voice_result_str:
+                logger.error(f"SenseVoice转换失败: {sense_voice_result_str}")
+                # Extract the core error message from sense_voice_result_str if it's formatted like "错误: actual error"
+                actual_error_message = sense_voice_result_str.split("错误:", 1)[-1].strip() if "错误:" in sense_voice_result_str else sense_voice_result_str
+                return "", (0, np.array([])), gr.update(value=f"错误 (SenseVoice): {actual_error_message}", visible=True)
+
+            # 改进文本提取逻辑
+            match = re.search(r"文本内容：(.*?)(\n文件保存路径：|$)", sense_voice_result_str, re.DOTALL)
+            if match:
+                transcribed_text = match.group(1).strip()
+            else:
+                # 兼容旧版或仅文本输出的情况
+                if sense_voice_result_str.startswith("转换成功！"):
+                     # 尝试去除 "转换成功！\n文本内容：" 和 "\n文件保存路径：..."
+                    text_content_part = sense_voice_result_str.replace("转换成功！", "").replace("文本内容：", "").strip()
+                    path_part_index = text_content_part.find("文件保存路径：")
+                    if path_part_index != -1:
+                        transcribed_text = text_content_part[:path_part_index].strip()
+                    else:
+                        transcribed_text = text_content_part # 如果没有路径信息，则认为剩余部分都是文本
+                else: # 如果格式不匹配，且不包含错误，则认为整个结果是文本
+                    transcribed_text = sense_voice_result_str.strip()
+
+            if not transcribed_text:
+                logger.warning("SenseVoice 未能提取有效文本")
+                return "", (0, np.array([])), gr.update(value="错误: 语音转文字未能提取有效文本", visible=True)
+            logger.info(f"提取的文本: {transcribed_text[:200]}...")
+
+            # 3. 调用大语言模型进行总结 (chat_with_ollama)
+            logger.info(f"开始使用Ollama模型 '{ollama_model}' 进行总结")
+            # 准备一个初始的空历史记录
+            initial_history = []
+            summary_history, (sample_rate, audio_data), ollama_error = chat_with_ollama(
+                message=f"请总结以下内容：\n\n{transcribed_text}",
+                model=ollama_model,
+                voice=tts_voice,
+                history=initial_history
+            )
+
+            if ollama_error:
+                logger.error(f"Ollama聊天错误: {ollama_error}")
+                return "", (0, np.array([])), gr.update(value=f"错误 (Ollama): {ollama_error}", visible=True)
+
+            summarized_text = ""
+            if summary_history and len(summary_history) > 0 and len(summary_history[-1]) == 2:
+                summarized_text = summary_history[-1][1] # 获取Ollama的回复
+
+            if not summarized_text:
+                logger.warning("Ollama未能生成总结文本")
+                return "", (0, np.array([])), gr.update(value="错误: 大语言模型未能生成总结文本", visible=True)
+
+            logger.info(f"总结文本: {summarized_text[:200]}...")
+            logger.info(f"生成语音数据，采样率: {sample_rate}, 数据长度: {len(audio_data) if audio_data is not None else 0}")
+
+            # 4. 返回总结文本和语音
+            return summarized_text, (sample_rate, audio_data), gr.update(value="", visible=False)
+
+    except Exception as e:
+        logger.error(f"视频总结过程中发生意外错误: {str(e)}\n{traceback.format_exc()}")
+        return "", (0, np.array([])), gr.update(value=f"严重错误: {str(e)}", visible=True)
+
 # 音频转文字 (SenseVoiceSmall)
 def sense_voice(audio_path: str) -> str:
     audio_path = process_path(audio_path)
     model_dir = "iic/SenseVoiceSmall"
     SENSE_VOICE_MODEL = AutoModel(
         model=model_dir,
-        trust_remote_code=True, 
+        trust_remote_code=True,
         vad_model="fsmn-vad",
         vad_kwargs={"max_single_segment_time": 30000},
         device="cuda:0" if torch.cuda.is_available() else "cpu",
@@ -482,14 +619,14 @@ def chat_with_ollama(message: str, model: str, voice: str, history: List[Tuple[s
         # think_matches = re.findall(r'(?i)<think\s*[^>]*>[\s\S]*?</think\s*>', assistant_text)
         # logger.info(f"匹配的<think>内容: {think_matches}")
 
-        
+
         # 生成语音（使用过滤后的文本）
         sample_rate, audio_data = text_to_speech(clean_text, voice) if clean_text else (0, np.array([]))
-        
+
         # 更新聊天历史（直接修改history）
         history.append((message, clean_text))
         logger.info(f"更新聊天历史: {history}")
-        
+
         return history, (sample_rate, audio_data), ""
     except Exception as e:
         logger.error(f"聊天错误: {str(e)}")
@@ -895,228 +1032,286 @@ def nl_to_sql(query: str, model: str = "llama3") -> Tuple[bool, str]:
 with gr.Blocks() as demo:
     gr.Markdown("# 音视频处理工具 (Gradio版)")
     gr.Markdown("提供视频/音频处理、语音识别、文字转语音、SRT处理、大语言模型聊天和自然语言数据库查询功能。")
+    with gr.TabItem("视频工具"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group():
+                        gr.Markdown("## 通过视频URL总结内容")
+                        video_url_input = gr.Textbox(label="视频URL (例如 B站, YouTube)", placeholder="请输入视频链接...")
+                        model_choices = get_ollama_models()
+                        ollama_model_dropdown_video = gr.Dropdown(
+                                label="选择模型",
+                                choices=model_choices,
+                                value=model_choices[0] if model_choices else None,
+                                interactive=True
+                            )
+                        tts_voice_dropdown_video =  gr.Dropdown(
+                                label="语音",
+                                choices=[
+                                    "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+                                    "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
+                                    "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
+                                    "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
+                                    "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
+                                    "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
+                                    "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
+                                    "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
+                                    "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
+                                    "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
+                                    "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
+                                    "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
+                                    "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
+                                    "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
+                                    "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
+                                    "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
+                                    "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
+                                    "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
+                                    "zm_096", "zm_097", "zm_098", "zm_100"
+                                ],
+                                value="zf_001"
+                            )
+                        summarize_video_button = gr.Button("开始总结视频")
+                        video_summary_output_text = gr.Markdown(label="总结结果")
+                        video_summary_output_audio = gr.Audio(label="总结语音", interactive=False, autoplay=True)
+                        video_summary_status_text = gr.Textbox(label="状态", interactive=False, visible=False)
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 视频信息")
-                video_path_info = gr.Textbox(label="视频路径")
-                info_btn = gr.Button("获取信息")
-                info_output = gr.Markdown()
-                info_btn.click(get_video_info, inputs=video_path_info, outputs=info_output)
+                        summarize_video_button.click(
+                            fn=summarize_video_url,
+                            inputs=[
+                                video_url_input,
+                                ollama_model_dropdown_video,
+                                tts_voice_dropdown_video
+                            ],
+                            outputs=[
+                                video_summary_output_text,
+                                video_summary_output_audio,
+                                video_summary_status_text
+                            ]
+                        )
 
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 音频提取")
-                video_path_extract = gr.Textbox(label="视频路径")
-                extract_btn = gr.Button("提取音频")
-                extract_output = gr.Textbox(label="结果")
-                extract_btn.click(extract_audio, inputs=video_path_extract, outputs=extract_output)
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 视频信息")
+                    video_path_info = gr.Textbox(label="视频路径")
+                    info_btn = gr.Button("获取信息")
+                    info_output = gr.Markdown()
+                    info_btn.click(get_video_info, inputs=video_path_info, outputs=info_output)
 
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 视频格式转换")
-                video_path_convert = gr.Textbox(label="视频路径")
-                output_format = gr.Textbox(label="输出格式")
-                convert_btn = gr.Button("转换视频")
-                convert_output = gr.Textbox(label="结果")
-                convert_btn.click(convert_video, inputs=[video_path_convert, output_format], outputs=convert_output)
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 音频提取")
+                    video_path_extract = gr.Textbox(label="视频路径")
+                    extract_btn = gr.Button("提取音频")
+                    extract_output = gr.Textbox(label="结果")
+                    extract_btn.click(extract_audio, inputs=video_path_extract, outputs=extract_output)
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 视频截取")
-                video_path_trim = gr.Textbox(label="视频路径")
-                start_time_video = gr.Number(label="起始时间(秒)", precision=1)
-                end_time_video = gr.Number(label="结束时间(秒)", precision=1)
-                trim_video_btn = gr.Button("截取视频")
-                trim_video_output = gr.Textbox(label="结果")
-                trim_video_btn.click(trim_video, inputs=[video_path_trim, start_time_video, end_time_video], outputs=trim_video_output)
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 视频格式转换")
+                    video_path_convert = gr.Textbox(label="视频路径")
+                    output_format = gr.Textbox(label="输出格式")
+                    convert_btn = gr.Button("转换视频")
+                    convert_output = gr.Textbox(label="结果")
+                    convert_btn.click(convert_video, inputs=[video_path_convert, output_format], outputs=convert_output)
 
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 音频截取")
-                audio_path_trim = gr.Textbox(label="音频路径")
-                start_time_audio = gr.Number(label="起始时间(秒)", precision=1)
-                end_time_audio = gr.Number(label="结束时间(秒)", precision=1)
-                trim_audio_btn = gr.Button("截取音频")
-                trim_audio_output = gr.Textbox(label="结果")
-                trim_audio_btn.click(trim_audio, inputs=[audio_path_trim, start_time_audio, end_time_audio], outputs=trim_audio_output)
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 视频截取")
+                    video_path_trim = gr.Textbox(label="视频路径")
+                    start_time_video = gr.Number(label="起始时间(秒)", precision=1)
+                    end_time_video = gr.Number(label="结束时间(秒)", precision=1)
+                    trim_video_btn = gr.Button("截取视频")
+                    trim_video_output = gr.Textbox(label="结果")
+                    trim_video_btn.click(trim_video, inputs=[video_path_trim, start_time_video, end_time_video], outputs=trim_video_output)
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 音频转文字")
-                audio_path_whisper = gr.Textbox(label="音频路径")
-                whisper_btn = gr.Button("开始转换")
-                whisper_output = gr.Textbox(label="结果")
-                whisper_btn.click(audio_to_text, inputs=audio_path_whisper, outputs=whisper_output)
+    with gr.TabItem("音频工具"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 文字转语音")
+                    text_input = gr.Textbox(label="文字", lines=5)
+                    voice_select = gr.Dropdown(
+                        label="音色",
+                        choices=[
+                            "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+                            "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
+                            "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
+                            "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
+                            "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
+                            "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
+                            "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
+                            "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
+                            "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
+                            "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
+                            "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
+                            "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
+                            "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
+                            "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
+                            "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
+                            "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
+                            "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
+                            "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
+                            "zm_096", "zm_097", "zm_098", "zm_100"
+                        ],
+                        value="zf_xiaoxiao"
+                    )
+                    tts_btn = gr.Button("生成语音")
+                    tts_output = gr.Audio(label="语音输出")
+                    tts_btn.click(text_to_speech, inputs=[text_input, voice_select], outputs=tts_output)
 
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 音频转文字 (Faster Whisper)")
-                audio_path_faster = gr.Textbox(label="音频路径")
-                faster_btn = gr.Button("开始转换")
-                faster_output = gr.Textbox(label="结果")
-                faster_btn.click(faster_whisper, inputs=audio_path_faster, outputs=faster_output)
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 音频转文字")
+                    audio_path_whisper = gr.Textbox(label="音频路径")
+                    whisper_btn = gr.Button("开始转换")
+                    whisper_output = gr.Textbox(label="结果")
+                    whisper_btn.click(audio_to_text, inputs=audio_path_whisper, outputs=whisper_output)
 
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 音频转文字 (SenseVoiceSmall)")
-                audio_path_sense = gr.Textbox(label="音频路径")
-                sense_btn = gr.Button("开始转换")
-                sense_output = gr.Textbox(label="结果")
-                sense_btn.click(sense_voice, inputs=audio_path_sense, outputs=sense_output)
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 音频转文字 (Faster Whisper)")
+                    audio_path_faster = gr.Textbox(label="音频路径")
+                    faster_btn = gr.Button("开始转换")
+                    faster_output = gr.Textbox(label="结果")
+                    faster_btn.click(faster_whisper, inputs=audio_path_faster, outputs=faster_output)
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 文字转语音")
-                text_input = gr.Textbox(label="文字", lines=5)
-                voice_select = gr.Dropdown(
-                    label="音色",
-                    choices=[
-                        "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
-                        "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
-                        "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
-                        "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
-                        "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
-                        "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
-                        "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
-                        "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
-                        "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
-                        "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
-                        "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
-                        "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
-                        "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
-                        "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
-                        "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
-                        "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
-                        "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
-                        "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
-                        "zm_096", "zm_097", "zm_098", "zm_100"
-                    ],
-                    value="zf_xiaoxiao"
-                )
-                tts_btn = gr.Button("生成语音")
-                tts_output = gr.Audio(label="语音输出")
-                tts_btn.click(text_to_speech, inputs=[text_input, voice_select], outputs=tts_output)
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 音频转文字 (SenseVoiceSmall)")
+                    audio_path_sense = gr.Textbox(label="音频路径")
+                    sense_btn = gr.Button("开始转换")
+                    sense_output = gr.Textbox(label="结果")
+                    sense_btn.click(sense_voice, inputs=audio_path_sense, outputs=sense_output)
 
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## SRT文件转音频")
-                srt_path = gr.Textbox(label="SRT文件路径")
-                srt_btn = gr.Button("生成音频")
-                srt_output = gr.Audio(label="音频输出")
-                srt_btn.click(srt_to_audio, inputs=srt_path, outputs=srt_output)
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 音频截取")
+                    audio_path_trim = gr.Textbox(label="音频路径")
+                    start_time_audio = gr.Number(label="起始时间(秒)", precision=1)
+                    end_time_audio = gr.Number(label="结束时间(秒)", precision=1)
+                    trim_audio_btn = gr.Button("截取音频")
+                    trim_audio_output = gr.Textbox(label="结果")
+                    trim_audio_btn.click(trim_audio, inputs=[audio_path_trim, start_time_audio, end_time_audio], outputs=trim_audio_output)
 
-    with gr.Row():
-        # 自然语言查数据库模块
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 自然语言查数据库")
-                model_choices = get_ollama_models()
-                sql_model_select = gr.Dropdown(
-                    label="选择模型",
-                    choices=model_choices,
-                    value=model_choices[0] if model_choices else None,
-                    interactive=True
-                )
-                sql_refresh_btn = gr.Button("刷新模型列表")
-                sql_input = gr.Textbox(
-                    label="输入查询",
-                    placeholder="输入自然语言查询，按回车或点击发送",
-                    elem_id="sql_input"
-                )
-                sql_btn = gr.Button("发送")
-                sql_output = gr.Markdown(label="查询结果")
-                sql_error = gr.Textbox(label="错误信息", visible=False)
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## SRT文件转音频")
+                    srt_path = gr.Textbox(label="SRT文件路径")
+                    srt_btn = gr.Button("生成音频")
+                    srt_output = gr.Audio(label="音频输出")
+                    srt_btn.click(srt_to_audio, inputs=srt_path, outputs=srt_output)
 
-                def sql_refresh_models():
-                    models = get_ollama_models()
-                    return gr.Dropdown.update(choices=models, value=models[0] if models else None)
+    with gr.TabItem("大模型工具"):
+        with gr.Row():
+            # 自然语言查数据库模块
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 自然语言查数据库")
+                    model_choices = get_ollama_models()
+                    sql_model_select = gr.Dropdown(
+                        label="选择模型",
+                        choices=model_choices,
+                        value=model_choices[0] if model_choices else None,
+                        interactive=True
+                    )
+                    sql_refresh_btn = gr.Button("刷新模型列表")
+                    sql_input = gr.Textbox(
+                        label="输入查询",
+                        placeholder="输入自然语言查询，按回车或点击发送",
+                        elem_id="sql_input"
+                    )
+                    sql_btn = gr.Button("发送")
+                    sql_output = gr.Markdown(label="查询结果")
+                    sql_error = gr.Textbox(label="错误信息", visible=False)
 
-                def update_sql(query, model):
-                    logger.info(f"处理查询: {query}, 模型: {model}")
-                    if not query.strip():
-                        logger.info("空查询，返回错误")
-                        return "", "错误: 请输入有效查询", ""
-                    success, result = nl_to_sql(query, model)
-                    logger.info(f"nl_to_sql 返回: success={success}, result={result}")
-                    if success:
-                        return result, "", ""
-                    return "", result, ""
+                    def sql_refresh_models():
+                        models = get_ollama_models()
+                        return gr.Dropdown.update(choices=models, value=models[0] if models else None)
 
-                sql_refresh_btn.click(sql_refresh_models, outputs=sql_model_select)
-                sql_input.submit(
-                    update_sql,
-                    inputs=[sql_input, sql_model_select],
-                    outputs=[sql_output, sql_error, sql_input]
-                )
-                sql_btn.click(
-                    update_sql,
-                    inputs=[sql_input, sql_model_select],
-                    outputs=[sql_output, sql_error, sql_input]
-                )
+                    def update_sql(query, model):
+                        logger.info(f"处理查询: {query}, 模型: {model}")
+                        if not query.strip():
+                            logger.info("空查询，返回错误")
+                            return "", "错误: 请输入有效查询", ""
+                        success, result = nl_to_sql(query, model)
+                        logger.info(f"nl_to_sql 返回: success={success}, result={result}")
+                        if success:
+                            return result, "", ""
+                        return "", result, ""
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 大语言模型音频聊天")
-                model_select = gr.Dropdown(label="选择模型", choices=get_ollama_models(), interactive=True)
-                refresh_btn = gr.Button("刷新模型列表")
-                chat_voice_select = gr.Dropdown(
-                    label="语音",
-                    choices=[
-                        "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
-                        "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
-                        "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
-                        "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
-                        "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
-                        "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
-                        "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
-                        "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
-                        "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
-                        "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
-                        "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
-                        "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
-                        "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
-                        "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
-                        "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
-                        "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
-                        "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
-                        "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
-                        "zm_096", "zm_097", "zm_098", "zm_100"
-                    ],
-                    value="zf_xiaoxiao"
-                )
-                chatbot = gr.Chatbot(label="聊天历史")
-                chat_input = gr.Textbox(label="输入文字", placeholder="输入消息，按回车或点击发送")
-                chat_btn = gr.Button("发送")
-                chat_audio = gr.Audio(label="语音回复", autoplay=True)  # 启用自动播放
-                chat_error = gr.Textbox(label="错误信息", visible=False)
-                
-                # 刷新模型列表
-                def refresh_models():
-                    models = get_ollama_models()
-                    return gr.Dropdown.update(choices=models, value=models[0] if models else None)
-                
-                # 包装chat_with_ollama，添加清空输入框
-                def update_chat(message, model, voice, history):
-                    new_history, audio, error = chat_with_ollama(message, model, voice, history)
-                    return new_history, audio, error, ""  # 清空输入框
-                
-                refresh_btn.click(refresh_models, outputs=model_select)
-                chat_input.submit(
-                    update_chat,
-                    inputs=[chat_input, model_select, chat_voice_select, chatbot],
-                    outputs=[chatbot, chat_audio, chat_error, chat_input]
-                )
-                chat_btn.click(
-                    update_chat,
-                    inputs=[chat_input, model_select, chat_voice_select, chatbot],
-                    outputs=[chatbot, chat_audio, chat_error, chat_input]
-                )
+                    sql_refresh_btn.click(sql_refresh_models, outputs=sql_model_select)
+                    sql_input.submit(
+                        update_sql,
+                        inputs=[sql_input, sql_model_select],
+                        outputs=[sql_output, sql_error, sql_input]
+                    )
+                    sql_btn.click(
+                        update_sql,
+                        inputs=[sql_input, sql_model_select],
+                        outputs=[sql_output, sql_error, sql_input]
+                    )
+
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group():
+                    gr.Markdown("## 大语言模型音频聊天")
+                    model_select = gr.Dropdown(label="选择模型", choices=get_ollama_models(), interactive=True)
+                    refresh_btn = gr.Button("刷新模型列表")
+                    chat_voice_select = gr.Dropdown(
+                        label="语音",
+                        choices=[
+                            "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+                            "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
+                            "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
+                            "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
+                            "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
+                            "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
+                            "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
+                            "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
+                            "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
+                            "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
+                            "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
+                            "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
+                            "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
+                            "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
+                            "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
+                            "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
+                            "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
+                            "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
+                            "zm_096", "zm_097", "zm_098", "zm_100"
+                        ],
+                        value="zf_001"
+                    )
+                    chatbot = gr.Chatbot(label="聊天历史")
+                    chat_input = gr.Textbox(label="输入文字", placeholder="输入消息，按回车或点击发送")
+                    chat_btn = gr.Button("发送")
+                    chat_audio = gr.Audio(label="语音回复", autoplay=True)  # 启用自动播放
+                    chat_error = gr.Textbox(label="错误信息", visible=False)
+
+                    # 刷新模型列表
+                    def refresh_models():
+                        models = get_ollama_models()
+                        return gr.Dropdown.update(choices=models, value=models[0] if models else None)
+
+                    # 包装chat_with_ollama，添加清空输入框
+                    def update_chat(message, model, voice, history):
+                        new_history, audio, error = chat_with_ollama(message, model, voice, history)
+                        return new_history, audio, error, ""  # 清空输入框
+
+                    refresh_btn.click(refresh_models, outputs=model_select)
+                    chat_input.submit(
+                        update_chat,
+                        inputs=[chat_input, model_select, chat_voice_select, chatbot],
+                        outputs=[chatbot, chat_audio, chat_error, chat_input]
+                    )
+                    chat_btn.click(
+                        update_chat,
+                        inputs=[chat_input, model_select, chat_voice_select, chatbot],
+                        outputs=[chatbot, chat_audio, chat_error, chat_input]
+                    )
 
 # 启动Gradio应用
 demo.launch(server_port=7860, debug=True)
