@@ -907,6 +907,24 @@ with gr.Blocks() as demo:
 
         with gr.Column(scale=1):
             with gr.Group():
+                gr.Markdown("## 音频提取")
+                video_path_extract = gr.Textbox(label="视频路径")
+                extract_btn = gr.Button("提取音频")
+                extract_output = gr.Textbox(label="结果")
+                extract_btn.click(extract_audio, inputs=video_path_extract, outputs=extract_output)
+
+        with gr.Column(scale=1):
+            with gr.Group():
+                gr.Markdown("## 视频格式转换")
+                video_path_convert = gr.Textbox(label="视频路径")
+                output_format = gr.Textbox(label="输出格式")
+                convert_btn = gr.Button("转换视频")
+                convert_output = gr.Textbox(label="结果")
+                convert_btn.click(convert_video, inputs=[video_path_convert, output_format], outputs=convert_output)
+
+    with gr.Row():
+        with gr.Column(scale=1):
+            with gr.Group():
                 gr.Markdown("## 视频截取")
                 video_path_trim = gr.Textbox(label="视频路径")
                 start_time_video = gr.Number(label="起始时间(秒)", precision=1)
@@ -914,15 +932,6 @@ with gr.Blocks() as demo:
                 trim_video_btn = gr.Button("截取视频")
                 trim_video_output = gr.Textbox(label="结果")
                 trim_video_btn.click(trim_video, inputs=[video_path_trim, start_time_video, end_time_video], outputs=trim_video_output)
-
-    with gr.Row():
-        with gr.Column(scale=1):
-            with gr.Group():
-                gr.Markdown("## 音频提取")
-                video_path_extract = gr.Textbox(label="视频路径")
-                extract_btn = gr.Button("提取音频")
-                extract_output = gr.Textbox(label="结果")
-                extract_btn.click(extract_audio, inputs=video_path_extract, outputs=extract_output)
 
         with gr.Column(scale=1):
             with gr.Group():
@@ -937,22 +946,12 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column(scale=1):
             with gr.Group():
-                gr.Markdown("## 视频格式转换")
-                video_path_convert = gr.Textbox(label="视频路径")
-                output_format = gr.Textbox(label="输出格式")
-                convert_btn = gr.Button("转换视频")
-                convert_output = gr.Textbox(label="结果")
-                convert_btn.click(convert_video, inputs=[video_path_convert, output_format], outputs=convert_output)
-
-        with gr.Column(scale=1):
-            with gr.Group():
                 gr.Markdown("## 音频转文字")
                 audio_path_whisper = gr.Textbox(label="音频路径")
                 whisper_btn = gr.Button("开始转换")
                 whisper_output = gr.Textbox(label="结果")
                 whisper_btn.click(audio_to_text, inputs=audio_path_whisper, outputs=whisper_output)
 
-    with gr.Row():
         with gr.Column(scale=1):
             with gr.Group():
                 gr.Markdown("## 音频转文字 (Faster Whisper)")
@@ -1010,6 +1009,7 @@ with gr.Blocks() as demo:
                 srt_btn = gr.Button("生成音频")
                 srt_output = gr.Audio(label="音频输出")
                 srt_btn.click(srt_to_audio, inputs=srt_path, outputs=srt_output)
+
     with gr.Row():
         # 自然语言查数据库模块
         with gr.Column(scale=1):
@@ -1058,6 +1058,7 @@ with gr.Blocks() as demo:
                     inputs=[sql_input, sql_model_select],
                     outputs=[sql_output, sql_error, sql_input]
                 )
+
     with gr.Row():
         with gr.Column(scale=1):
             with gr.Group():
