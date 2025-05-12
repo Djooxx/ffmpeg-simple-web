@@ -16,7 +16,7 @@ from pathlib import Path
 import srt
 from datetime import timedelta
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Union
 import torch
 import tqdm
 import mysql.connector # 添加 MySQL 连接器
@@ -29,6 +29,8 @@ from urllib.parse import urlparse, urlunparse
 from kokoro import KModel, KPipeline  # 需确认实际导入方式
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
+# 全局Ollama客户端实例
+ollama_client = ollama.Client(host='http://127.0.0.1:11434')
 # 设置日志
 
 logger = logging.getLogger(__name__)
@@ -115,21 +117,21 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
         return wavs
 
 # 文字转语音（适配Gradio）
-def text_to_speech(text: str, voice: str) -> Tuple[int, np.ndarray]:
+def text_to_speech(text: str, voice: str) -> Union[Tuple[int, np.ndarray], None]: # Modified return type
     try:
         wavs = generate_audio_data(text, voice)
         if not wavs:
             logger.error("没有生成音频数据")
-            return 0, np.array([])
+            return None # Modified line
         audio_data = np.concatenate(wavs)
         sample_rate = 24000  # Kokoro固定采样率
         return sample_rate, audio_data
     except Exception as e:
         logger.error(f"TTS错误: {str(e)}")
-        return 0, np.array([])
+        return None # Modified line
 
 # SRT文件转音频
-def srt_to_audio(srt_path: str) -> Tuple[int, np.ndarray]:
+def srt_to_audio(srt_path: str) -> Union[Tuple[int, np.ndarray], None]: # Modified return type
     srt_path = process_path(srt_path)
     try:
         with open(srt_path, "r", encoding="utf-8") as f:
@@ -145,17 +147,23 @@ def srt_to_audio(srt_path: str) -> Tuple[int, np.ndarray]:
                 silence = np.zeros(int(sample_rate * (start_time - last_end)))
                 full_audio = np.concatenate([full_audio, silence])
             # 生成音频
-            temp_rate, temp_audio = text_to_speech(text, voice="zf_xiaoxiao")
-            if temp_rate == 0:
+            temp_audio_tuple = text_to_speech(text, voice="zf_xiaoxiao") # Modified to handle None
+            if temp_audio_tuple is None:
+                logger.warning(f"Skipping subtitle due to TTS failure for: {text[:50]}...")
+                continue
+            temp_rate, temp_audio = temp_audio_tuple
+            if temp_audio is None or temp_audio.size == 0: # Additional check for safety
+                logger.warning(f"Skipping subtitle due to empty audio from TTS for: {text[:50]}...")
                 continue
             full_audio = np.concatenate([full_audio, temp_audio]) if full_audio.size else temp_audio
             last_end = start_time + len(temp_audio) / sample_rate
         if full_audio.size == 0:
-            return 0, np.array([])
+            logger.warning("SRT转音频后，full_audio为空")
+            return None # Modified line
         return sample_rate, full_audio
     except Exception as e:
         logger.error(f"SRT转音频错误: {str(e)}")
-        return 0, np.array([])
+        return None # Modified line
 
 # 文件大小单位转换
 def convert_size(size_bytes):
@@ -440,14 +448,14 @@ def clean_bilibili_url(video_url):
     return cleaned_url
 
 # 总结视频内容
-def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tuple[str, Tuple[int, np.ndarray], gr.update]:
+def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tuple[str, Union[Tuple[int, np.ndarray], None], gr.update]: # Modified return type
     try:
         if not video_url.strip():
-            return "", (0, np.array([])), gr.update(value="错误: 请输入视频URL", visible=True)
+            return "", None, gr.update(value="错误: 请输入视频URL", visible=True) # Modified line
         if not ollama_model:
-            return "", (0, np.array([])), gr.update(value="错误: 请选择Ollama模型", visible=True)
+            return "", None, gr.update(value="错误: 请选择Ollama模型", visible=True) # Modified line
         if not tts_voice:
-            return "", (0, np.array([])), gr.update(value="错误: 请选择TTS语音", visible=True)
+            return "", None, gr.update(value="错误: 请选择TTS语音", visible=True) # Modified line
 
         logger.info(f"开始总结视频URL: {video_url} 使用模型: {ollama_model} 和语音: {tts_voice}")
 
@@ -476,16 +484,16 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                     downloaded_files = os.listdir(tmpdir)
                     if not downloaded_files:
                         logger.error("yt_dlp 未能下载任何文件")
-                        return "", (0, np.array([])), gr.update(value="错误: 无法从URL下载音频 (无文件)", visible=True)
+                        return "", None, gr.update(value="错误: 无法从URL下载音频 (无文件)", visible=True) # Modified line
                     downloaded_audio_path = os.path.join(tmpdir, downloaded_files[0])
                     logger.info(f"音频已下载到: {downloaded_audio_path}")
                 except Exception as e:
                     logger.error(f"yt_dlp 下载错误: {str(e)}")
-                    return "", (0, np.array([])), gr.update(value=f"错误: 无法从URL下载音频: {str(e)}", visible=True)
+                    return "", None, gr.update(value=f"错误: 无法从URL下载音频: {str(e)}", visible=True) # Modified line
 
             if not downloaded_audio_path or not os.path.exists(downloaded_audio_path):
                 logger.error("下载的音频文件路径无效或文件不存在")
-                return "", (0, np.array([])), gr.update(value="错误: 下载的音频文件处理失败", visible=True)
+                return "", None, gr.update(value="错误: 下载的音频文件处理失败", visible=True) # Modified line
 
             # 2. 音频转文字 (SenseVoiceSmall)
             logger.info(f"开始使用SenseVoice进行语音转文字: {downloaded_audio_path}")
@@ -498,7 +506,7 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                 logger.error(f"SenseVoice转换失败: {sense_voice_result_str}")
                 # Extract the core error message from sense_voice_result_str if it's formatted like "错误: actual error"
                 actual_error_message = sense_voice_result_str.split("错误:", 1)[-1].strip() if "错误:" in sense_voice_result_str else sense_voice_result_str
-                return "", (0, np.array([])), gr.update(value=f"错误 (SenseVoice): {actual_error_message}", visible=True)
+                return "", None, gr.update(value=f"错误 (SenseVoice): {actual_error_message}", visible=True) # Modified line
 
             # 改进文本提取逻辑
             match = re.search(r"文本内容：(.*?)(\n文件保存路径：|$)", sense_voice_result_str, re.DOTALL)
@@ -519,14 +527,14 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
 
             if not transcribed_text:
                 logger.warning("SenseVoice 未能提取有效文本")
-                return "", (0, np.array([])), gr.update(value="错误: 语音转文字未能提取有效文本", visible=True)
+                return "", None, gr.update(value="错误: 语音转文字未能提取有效文本", visible=True) # Modified line
             logger.info(f"提取的文本: {transcribed_text[:200]}...")
 
             # 3. 调用大语言模型进行总结 (chat_with_ollama)
             logger.info(f"开始使用Ollama模型 '{ollama_model}' 进行总结")
             # 准备一个初始的空历史记录
             initial_history = []
-            summary_history, (sample_rate, audio_data), ollama_error = chat_with_ollama(
+            summary_history, audio_tuple, ollama_error = chat_with_ollama(
                 message=f"请总结以下内容：\n\n{transcribed_text}",
                 model=ollama_model,
                 voice=tts_voice,
@@ -535,7 +543,9 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
 
             if ollama_error:
                 logger.error(f"Ollama聊天错误: {ollama_error}")
-                return "", (0, np.array([])), gr.update(value=f"错误 (Ollama): {ollama_error}", visible=True)
+                return "", None, gr.update(value=f"错误 (Ollama): {ollama_error}", visible=True) # Modified line
+            
+            sample_rate, audio_data = audio_tuple if audio_tuple is not None else (None, None)
 
             summarized_text = ""
             if summary_history and len(summary_history) > 0 and len(summary_history[-1]) == 2:
@@ -543,17 +553,17 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
 
             if not summarized_text:
                 logger.warning("Ollama未能生成总结文本")
-                return "", (0, np.array([])), gr.update(value="错误: 大语言模型未能生成总结文本", visible=True)
+                return "", None, gr.update(value="错误: 大语言模型未能生成总结文本", visible=True) # Modified line
 
             logger.info(f"总结文本: {summarized_text[:200]}...")
-            logger.info(f"生成语音数据，采样率: {sample_rate}, 数据长度: {len(audio_data) if audio_data is not None else 0}")
+            logger.info(f"生成语音数据，采样率: {sample_rate}, 数据长度: {len(audio_data) if audio_data is not None and isinstance(audio_data, np.ndarray) else 0}")
 
             # 4. 返回总结文本和语音
-            return summarized_text, (sample_rate, audio_data), gr.update(value="", visible=False)
+            return summarized_text, (sample_rate, audio_data) if sample_rate is not None and audio_data is not None else None, gr.update(value="", visible=False) # Modified line
 
     except Exception as e:
         logger.error(f"视频总结过程中发生意外错误: {str(e)}\n{traceback.format_exc()}")
-        return "", (0, np.array([])), gr.update(value=f"严重错误: {str(e)}", visible=True)
+        return "", None, gr.update(value=f"严重错误: {str(e)}", visible=True) # Modified line
 
 # 音频转文字 (SenseVoiceSmall)
 def sense_voice(audio_path: str) -> str:
@@ -589,7 +599,8 @@ def sense_voice(audio_path: str) -> str:
 # 获取Ollama模型
 def get_ollama_models() -> List[str]:
     try:
-        models = ollama.list()
+        # 使用全局Ollama客户端
+        models = ollama_client.list()
         return [model["model"] for model in models["models"]]
     except Exception:
         return []
@@ -609,7 +620,7 @@ def chat_with_ollama(message: str, model: str, voice: str, history: List[Tuple[s
             if assistant_msg:
                 messages.append({"role": "assistant", "content": assistant_msg})
         messages.append({"role": "user", "content": message})
-        response = ollama.chat(model=model, messages=messages)
+        response = ollama_client.chat(model=model, messages=messages)
         assistant_text = response["message"]["content"]
         logger.info(f"原始回复: {assistant_text}")
         # 改进正则表达式，匹配多行<think>标签
@@ -945,7 +956,7 @@ def nl_to_sql(query: str, model: str = "llama3") -> Tuple[bool, str]:
     while retries < max_retries:
         retries += 1
         try:
-            response = ollama.chat(model=model, messages=messages, options={"response_format": {"type": "json_object"}})
+            response = ollama_client.chat(model=model, messages=messages, options={"response_format": {"type": "json_object"}})
             ollama_response_str = response["message"]["content"]
             logger.info(f"Ollama Raw Response ({retries}): {ollama_response_str}")
 
