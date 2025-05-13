@@ -27,6 +27,8 @@ import tempfile
 from urllib.parse import urlparse, urlunparse
 # 假设Kokoro相关库已安装
 from kokoro import KModel, KPipeline  # 需确认实际导入方式
+import cv2
+import base64
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 # 全局Ollama客户端实例
@@ -1039,6 +1041,50 @@ def nl_to_sql(query: str, model: str = "llama3") -> Tuple[bool, str]:
     logger.error("无法在指定次数内获取有效答案")
     return False, "错误: 无法在指定次数内获取有效答案"
 
+def analyze_videos(frame: np.ndarray): # 为frame添加类型提示
+    if frame is None:
+        print("错误：输入的帧为 None，无法处理。")
+        return None # 对于 output_img 组件返回 None
+
+    timestamp_ms = int(time.time() * 1000)
+    
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing frame, will work")
+
+    try:
+        # 校正图像方向：
+        # flipCode = 0：垂直翻转（上下）。
+        # flipCode = 1：水平翻转（左右）。
+        # flipCode = -1：同时水平和垂直翻转（相当于 180° 旋转）。
+        frame = cv2.flip(frame, 1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # 将图像编码为 PNG 格式的字节并转为 base64
+        _, buffer = cv2.imencode('.png', frame_rgb)
+        base64_string = base64.b64encode(buffer).decode('utf-8')
+        
+        # 准备 Ollama 的消息格式
+        messages = [
+            {
+                "role": "user",
+                "content": "请分析图片中的内容，简短描述图片上有什么。",
+                "images": [base64_string]  # 直接传递 base64 字符串
+            }
+        ]
+        # 调用 Ollama 模型
+        model = "gemma3:12b-it-qat"
+        response = ollama_client.chat(model=model, messages=messages)
+        # 提取 Ollama 的回复
+        ollama_result = response.get("message", {}).get("content", "Ollama 未返回有效结果")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ollama 分析结果: {ollama_result[:20]}...")
+        return ollama_result
+    except cv2.error as e:
+        print(f"OpenCV 错误：无法处理. 错误信息: {e}")
+        return None 
+    except Exception as e:
+        print(f"发生未知错误：无法处理. 错误信息: {e}")
+        return None 
+
+
 # Gradio界面
 with gr.Blocks() as demo:
     gr.Markdown("# 音视频处理工具 (Gradio版)")
@@ -1324,5 +1370,23 @@ with gr.Blocks() as demo:
                         outputs=[chatbot, chat_audio, chat_error, chat_input]
                     )
 
+    with gr.TabItem("实时视频分析"):
+        gr.Markdown("### Real time video")
+        with gr.Row():
+            with gr.Column(scale=1):
+                input_img = gr.Image(sources=["webcam"], type="numpy", label="Webcam Input",  mirror_webcam=False)
+            with gr.Column(scale=1):
+                status_message = gr.Markdown(
+                    label="分析结果"
+                )
+
+        dep = input_img.stream(
+            fn=analyze_videos, 
+            inputs=[input_img], # 或者直接 inputs=input_img
+            outputs=[status_message],
+            stream_every=5,     # 目标更新频率:值越小，请求越频繁，对性能要求越高。(参数必须是stream_every)
+            concurrency_limit=1, # 限制并发数为1，逐帧处理。
+            time_limit=5    # 如果函数可能卡死，可以保留。
+        )
 # 启动Gradio应用
 demo.launch(server_port=7860, debug=True)
