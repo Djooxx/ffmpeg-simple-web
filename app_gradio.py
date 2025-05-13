@@ -469,8 +469,8 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                 'outtmpl': os.path.join(tmpdir, '%(title)s.%(ext)s'),
                 'keepvideo': False,
                 'noplaylist': True,
-                'quiet': True,
-                'no_warnings': True,
+                'quiet': False,
+                'no_warnings': False,
             }
             downloaded_audio_path = None
             with YoutubeDL(ydl_opts) as ydl:
@@ -535,7 +535,7 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
             # 准备一个初始的空历史记录
             initial_history = []
             summary_history, audio_tuple, ollama_error = chat_with_ollama(
-                message=f"请总结以下内容：\n\n{transcribed_text}",
+                message=f"请使用中文总结以下内容：\n\n{transcribed_text}",
                 model=ollama_model,
                 voice=tts_voice,
                 history=initial_history
