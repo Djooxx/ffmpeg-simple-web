@@ -1127,12 +1127,12 @@ with gr.Blocks() as demo:
                             ollama_model_dropdown_video = gr.Dropdown(
                                     label="选择模型",
                                     choices=model_choices,
-                                    value=model_choices[0] if model_choices else None,
+                                    value="qwen3:14b" if model_choices else None,
                                     interactive=True,
                                     scale=1 # Optional: adjust scale for relative width
                                 )
                             tts_voice_dropdown_video =  gr.Dropdown(
-                                    label="语音",
+                                    label="选择音色",
                                     choices=[
                                         "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
                                         "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
@@ -1220,7 +1220,7 @@ with gr.Blocks() as demo:
                     gr.Markdown("## 文字转语音")
                     text_input = gr.Textbox(label="文字", lines=5)
                     voice_select = gr.Dropdown(
-                        label="音色",
+                        label="选择音色",
                         choices=[
                             "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
                             "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
@@ -1302,7 +1302,7 @@ with gr.Blocks() as demo:
                     sql_model_select = gr.Dropdown(
                         label="选择模型",
                         choices=model_choices,
-                        value=model_choices[0] if model_choices else None,
+                        value="qwen3:14b" if model_choices else None,
                         interactive=True
                     )
                     sql_input = gr.Textbox(
@@ -1340,32 +1340,36 @@ with gr.Blocks() as demo:
             with gr.Column(scale=1):
                 with gr.Group():
                     gr.Markdown("## 大语言模型音频聊天")
-                    model_select = gr.Dropdown(label="选择模型", choices=get_ollama_models(), interactive=True)
-                    chat_voice_select = gr.Dropdown(
-                        label="语音",
-                        choices=[
-                            "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
-                            "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
-                            "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
-                            "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
-                            "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
-                            "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
-                            "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
-                            "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
-                            "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
-                            "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
-                            "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
-                            "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
-                            "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
-                            "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
-                            "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
-                            "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
-                            "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
-                            "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
-                            "zm_096", "zm_097", "zm_098", "zm_100"
-                        ],
-                        value="zf_001"
-                    )
+                    # ---- START: Place dropdowns in a new Row ----
+                    with gr.Row():
+                        model_choices = get_ollama_models()
+                        model_select = gr.Dropdown(label="选择模型", choices=model_choices, value="qwen3:14b" if model_choices else None, interactive=True)
+                        chat_voice_select = gr.Dropdown(
+                            label="选择音色",
+                            choices=[
+                                "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+                                "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
+                                "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
+                                "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
+                                "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
+                                "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
+                                "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
+                                "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
+                                "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
+                                "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
+                                "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
+                                "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
+                                "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
+                                "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
+                                "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
+                                "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
+                                "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
+                                "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
+                                "zm_096", "zm_097", "zm_098", "zm_100"
+                            ],
+                            value="zf_001"
+                        )
+                    # ---- END: Place dropdowns in a new Row ----
                     chatbot = gr.Chatbot(label="聊天历史")
                     chat_input = gr.Textbox(label="输入文字", placeholder="输入消息，按回车或点击发送")
                     chat_btn = gr.Button("发送")
