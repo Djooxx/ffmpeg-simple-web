@@ -464,6 +464,7 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
         video_url = clean_bilibili_url(video_url)
         logger.info(f"清理后的视频URL: {video_url}")
 
+        video_title = "未知标题" # 初始化标题
         # 1. 下载音频
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts = {
@@ -477,21 +478,34 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
             downloaded_audio_path = None
             with YoutubeDL(ydl_opts) as ydl:
                 try:
-                    info_dict = ydl.extract_info(video_url, download=True)
-                    # ydl.download([video_url]) # extract_info with download=True already downloads
-                    # 获取下载的文件路径
-                    # filename = ydl.prepare_filename(info_dict) # This gives the template
-                    # Actual filename is based on outtmpl and info_dict
-                    # A bit hacky, assumes one file downloaded into tmpdir
+                    logger.info(f"开始使用 yt-dlp 下载: {video_url}")
+                    info_dict = ydl.extract_info(video_url, download=True) # download=True 会执行下载
+                    video_title = info_dict.get('title', '未知标题') # <-- 获取标题
+                    logger.info(f"提取到的视频标题: {video_title}")
+
+                    # ydl.prepare_filename(info_dict) 返回的是基于模板的文件名，但不一定是实际下载的文件名
+                    # 更好的方式是检查 tmpdir 中的文件
                     downloaded_files = os.listdir(tmpdir)
                     if not downloaded_files:
                         logger.error("yt_dlp 未能下载任何文件")
-                        return "", None, gr.update(value="错误: 无法从URL下载音频 (无文件)", visible=True) # Modified line
+                        return "", None, gr.update(value="错误: 无法从URL下载音频 (无文件)", visible=True)
+                    
+                    # 假设只有一个音频文件被下载 (因为 noplaylist=True)
+                    # 并且文件名可能包含特殊字符，yt-dlp会处理
+                    # 我们只需要tmpdir中的第一个（也应该是唯一一个）文件
                     downloaded_audio_path = os.path.join(tmpdir, downloaded_files[0])
                     logger.info(f"音频已下载到: {downloaded_audio_path}")
                 except Exception as e:
-                    logger.error(f"yt_dlp 下载错误: {str(e)}")
-                    return "", None, gr.update(value=f"错误: 无法从URL下载音频: {str(e)}", visible=True) # Modified line
+                    logger.error(f"yt_dlp 下载或提取信息错误: {str(e)}")
+                    # 可以尝试从错误信息中获取更具体的yt-dlp错误
+                    error_message = str(e)
+                    if "Unsupported URL" in error_message:
+                         actual_error = "不支持的URL或视频无法访问"
+                    elif "Video unavailable" in error_message:
+                         actual_error = "视频不可用"
+                    else:
+                         actual_error = error_message # 保留原始错误的部分信息
+                    return "", None, gr.update(value=f"错误 (yt-dlp): {actual_error}", visible=True)
 
             if not downloaded_audio_path or not os.path.exists(downloaded_audio_path):
                 logger.error("下载的音频文件路径无效或文件不存在")
@@ -536,8 +550,20 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
             logger.info(f"开始使用Ollama模型 '{ollama_model}' 进行总结")
             # 准备一个初始的空历史记录
             initial_history = []
+            optimized_prompt = (
+                f"视频标题：【{video_title}】\n\n"
+                f"这是一段来自上述标题视频的语音转录文本（由SenseVoiceSmall识别，源自Bilibili或YouTube）。"
+                f"请你用中文为其撰写一份清晰、简洁、易于理解的内容摘要。\n"
+                f"摘要应重点突出以下几点：\n"
+                f"1. 视频的核心主题或主要内容是什么？（请结合标题和文本内容判断）\n"
+                f"2. 视频中讨论了哪些关键的观点、信息、步骤或有趣的亮点？（如果适合，请用分点列出）\n"
+                f"3. 视频最终想要传达的核心信息或结论是什么？\n"
+                f"请在总结时，尽量忽略原始语音中可能存在的口头禅、不必要的重复或不流畅之处，专注于提炼有价值的信息。"
+                f"目标是让未观看视频的人也能快速把握视频的精髓。\n\n"
+                f"视频文本如下：\n{transcribed_text}"
+            )
             summary_history, audio_tuple, ollama_error = chat_with_ollama(
-                message=f"请使用中文总结以下内容：\n\n{transcribed_text}",
+                message=optimized_prompt,
                 model=ollama_model,
                 voice=tts_voice,
                 history=initial_history
@@ -1095,38 +1121,43 @@ with gr.Blocks() as demo:
                 with gr.Group():
                         gr.Markdown("## 通过视频URL总结内容")
                         video_url_input = gr.Textbox(label="视频URL (例如 B站, YouTube)", placeholder="请输入视频链接...")
-                        model_choices = get_ollama_models()
-                        ollama_model_dropdown_video = gr.Dropdown(
-                                label="选择模型",
-                                choices=model_choices,
-                                value=model_choices[0] if model_choices else None,
-                                interactive=True
-                            )
-                        tts_voice_dropdown_video =  gr.Dropdown(
-                                label="语音",
-                                choices=[
-                                    "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
-                                    "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
-                                    "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
-                                    "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
-                                    "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
-                                    "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
-                                    "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
-                                    "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
-                                    "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
-                                    "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
-                                    "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
-                                    "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
-                                    "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
-                                    "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
-                                    "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
-                                    "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
-                                    "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
-                                    "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
-                                    "zm_096", "zm_097", "zm_098", "zm_100"
-                                ],
-                                value="zf_001"
-                            )
+                        # ---- START: Place dropdowns in a new Row ----
+                        with gr.Row():
+                            model_choices = get_ollama_models()
+                            ollama_model_dropdown_video = gr.Dropdown(
+                                    label="选择模型",
+                                    choices=model_choices,
+                                    value=model_choices[0] if model_choices else None,
+                                    interactive=True,
+                                    scale=1 # Optional: adjust scale for relative width
+                                )
+                            tts_voice_dropdown_video =  gr.Dropdown(
+                                    label="语音",
+                                    choices=[
+                                        "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+                                        "zm_yunxia", "zm_yunjian", "zm_yunxi", "zm_yunyang",
+                                        "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006",
+                                        "zf_007", "zf_008", "zf_017", "zf_018", "zf_019", "zf_021",
+                                        "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
+                                        "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042",
+                                        "zf_043", "zf_044", "zf_046", "zf_047", "zf_048", "zf_049",
+                                        "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
+                                        "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077",
+                                        "zf_078", "zf_079", "zf_083", "zf_084", "zf_085", "zf_086",
+                                        "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
+                                        "zf_099", "zm_009", "zm_010", "zm_011", "zm_012", "zm_013",
+                                        "zm_014", "zm_015", "zm_016", "zm_020", "zm_025", "zm_029",
+                                        "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037",
+                                        "zm_041", "zm_045", "zm_050", "zm_052", "zm_053", "zm_054",
+                                        "zm_055", "zm_056", "zm_057", "zm_058", "zm_061", "zm_062",
+                                        "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069",
+                                        "zm_080", "zm_081", "zm_082", "zm_089", "zm_091", "zm_095",
+                                        "zm_096", "zm_097", "zm_098", "zm_100"
+                                    ],
+                                    value="zf_001",
+                                    scale=1 # Optional: adjust scale for relative width
+                                )
+                        # ---- END: Place dropdowns in a new Row ----
                         summarize_video_button = gr.Button("开始总结视频")
                         video_summary_output_text = gr.Markdown(label="总结结果")
                         video_summary_output_audio = gr.Audio(label="总结语音", interactive=False, autoplay=True)
