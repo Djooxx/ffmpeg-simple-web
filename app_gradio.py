@@ -678,7 +678,7 @@ DB_CONFIG = {
     'port': 9981,
     'user': 'root',
     'password': '1234qwer',
-    'database': 'employees',  # 请根据实际数据库修改
+    'database': 'money',  # 请根据实际数据库修改
     'raise_on_warnings': True
 }
 
@@ -1305,7 +1305,6 @@ with gr.Blocks() as demo:
                         value=model_choices[0] if model_choices else None,
                         interactive=True
                     )
-                    sql_refresh_btn = gr.Button("刷新模型列表")
                     sql_input = gr.Textbox(
                         label="输入查询",
                         placeholder="输入自然语言查询，按回车或点击发送",
@@ -1314,10 +1313,6 @@ with gr.Blocks() as demo:
                     sql_btn = gr.Button("发送")
                     sql_output = gr.Markdown(label="查询结果")
                     sql_error = gr.Textbox(label="错误信息", visible=False)
-
-                    def sql_refresh_models():
-                        models = get_ollama_models()
-                        return gr.Dropdown.update(choices=models, value=models[0] if models else None)
 
                     def update_sql(query, model):
                         logger.info(f"处理查询: {query}, 模型: {model}")
@@ -1330,7 +1325,6 @@ with gr.Blocks() as demo:
                             return result, "", ""
                         return "", result, ""
 
-                    sql_refresh_btn.click(sql_refresh_models, outputs=sql_model_select)
                     sql_input.submit(
                         update_sql,
                         inputs=[sql_input, sql_model_select],
@@ -1347,7 +1341,6 @@ with gr.Blocks() as demo:
                 with gr.Group():
                     gr.Markdown("## 大语言模型音频聊天")
                     model_select = gr.Dropdown(label="选择模型", choices=get_ollama_models(), interactive=True)
-                    refresh_btn = gr.Button("刷新模型列表")
                     chat_voice_select = gr.Dropdown(
                         label="语音",
                         choices=[
@@ -1379,17 +1372,11 @@ with gr.Blocks() as demo:
                     chat_audio = gr.Audio(label="语音回复", autoplay=True)  # 启用自动播放
                     chat_error = gr.Textbox(label="错误信息", visible=False)
 
-                    # 刷新模型列表
-                    def refresh_models():
-                        models = get_ollama_models()
-                        return gr.Dropdown.update(choices=models, value=models[0] if models else None)
-
                     # 包装chat_with_ollama，添加清空输入框
                     def update_chat(message, model, voice, history):
                         new_history, audio, error = chat_with_ollama(message, model, voice, history)
                         return new_history, audio, error, ""  # 清空输入框
 
-                    refresh_btn.click(refresh_models, outputs=model_select)
                     chat_input.submit(
                         update_chat,
                         inputs=[chat_input, model_select, chat_voice_select, chatbot],
