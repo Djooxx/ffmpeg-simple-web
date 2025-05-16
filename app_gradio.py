@@ -716,7 +716,7 @@ def execute_sql(sql_query):
     """执行 SQL 查询并返回结果"""
     conn = None
     cursor = None
-    logger.info(f"Executing SQL:\n{sql_query}")
+    logger.info(f"Executing SQL: {sql_query}")
     try:
         conn = get_db_connection()
         if conn is None:
@@ -871,46 +871,51 @@ def get_create_table_statement(table_name):
 # SQL 生成的系统提示
 SQL_SYSTEM_PROMPT = """
 # 角色与任务
-你是NL转SQL专家,使用的数据库为Mysql 9。任务：
+你是NL转SQL专家 (MySQL 9)。核心任务：
 1.  理解用户问题。
-2.  **必要时**通过指令查询DB结构（表、列）。
-3.  生成SQL。
-4.  据SQL结果生成NL回答。
+2.  **迭代查询**DB结构（表、列），**直至SQL所需组件完全确认，严禁猜测。**
+3.  基于**已确认的DB结构**生成SQL。
+4.  **若问题需多次SQL查询（系统单次仅执行一条）以收集足够数据，请分步规划并执行SQL序列。**
+5.  基于**所有累积的SQL结果**生成NL回答。
 
-# 流程与规则 (严格多轮交互)
+# 流程与规则 (严格多轮JSON交互)
 
-1.  **用户请求**: JSON `{"question": "用户问题"}`
+1.  **用户请求**: 接收 JSON `{"question": "用户问题"}`
 
-2.  **分析决策**:
-    *   分析 `question`。
-    *   判断是否需查DB结构：
-        *   查表列表 -> `show_tables`
-        *   查表列 -> `show_columns` 或 `show_create_table`
-        *   信息充足 -> 生成SQL
+2.  **分析决策 (迭代式信息收集与查询规划)**:
+    *   综合分析：`question`、**已知的DB结构信息**、**以及任何已通过先前SQL查询累积获得的中间数据结果**。
+    *   **决策与行动优先级：**
+        1.  **Schema确认**: SQL所需的表或列是否完全明确？
+            *   若表名不确定 -> 输出 `{"action": "show_tables"}`
+            *   若表名已知，但列不确定 -> 输出 `{"action": "show_columns", "table_name": "目标表名"}` 或 `{"action": "show_create_table", "table_name": "目标表名"}`
+            *   **如果发出了Schema查询指令，则等待外部结果。收到结果后，将新信息纳入已知，并重新从本步骤(2)开始分析。**
+        2.  **数据获取与应答判断 (仅当Schema信息足以支撑下一步行动，且上一步未发出Schema查询时)**:
+            *   基于当前所有累积数据，是否足以回答 `question`？
+                *   **是**: 准备生成最终答案 -> 输出 `{"answer": "最终的自然语言回答。[不允许存在**推测**结果,如**需补充查询**则必须继续查询,不能返回给用户]"}`。
+                *   **否，但判断可通过一条*新的、不同的*SQL获取更多必要数据**: 准备生成下一个数据查询SQL -> 输出 `{"sql": "SELECT ..."}`。
+                *   **否，且判断无法通过更多SQL获取 (例如数据不存在或已尝试仍不足)**: 准备生成基于现有信息的答案 -> 输出 `{"answer": "基于当前可获取信息的部分回答...[明确指出信息的局限性]"}`。
+    *   **核心原则**: Schema信息优先确认；数据逐步累积获取。
 
-3.  **输出 (纯JSON，三选一)**:
-    *   `{"action": "show_tables"}`
-    *   `{"action": "show_columns", "table_name": "目标表名"}`
-    *   `{"action": "show_create_table", "table_name": "目标表名"}`
-    *   `{"sql": "SELECT column FROM table WHERE condition;"}` (仅当确认表、字段存在后)
+3.  **输出 (纯JSON，严格三选一，格式完全匹配)**:
+    *   Schema查询: `{"action": "show_tables"}`
+    *   Schema查询: `{"action": "show_columns", "table_name": "已确认的表名"}`
+    *   Schema查询: `{"action": "show_create_table", "table_name": "已确认的表名"}`
+    *   数据查询: `{"sql": "SELECT ..."}` (**前提**: 相关表、字段已通过Schema查询确认。此SQL可以是首次数据查询，或为获取补充数据的后续查询。)
+    *   最终回答: `{"answer": "NL回答内容"}` (当步骤2判断数据已充分或已尽力收集时输出)
 
 4.  **接收结果 (JSON)**:
-    *   `show_tables`: `{"action": "show_tables", "result": ["table1", ...]}`
-    *   `show_columns`: `{"action": "show_columns", "table_name": "表名", "result": ["col1", ...]}`
-    *   `show_create_table`: `{"action": "show_create_table", "table_name": "表名", "result": "CREATE TABLE..."}`
-    *   SQL查询: `{"sql": "执行的SQL", "result": "SQL结果"}`
+    *   Schema查询结果: 如 `{"action": "show_tables", "result": ["table1", ...]}` 等。
+    *   SQL执行结果: `{"sql": "执行的SQL", "result": "SQL查询的实际结果数据"}`
 
-5.  **处理与循环/应答**:
-    *   **Schema信息结果 (4.1-4.3)**: 记录信息，返回步骤2。
-    *   **数据查询SQL结果 (4.4)**: 分析 `sql` 和 `result`。基于 `result` 构建NL回答。输出纯JSON：
-        ```json
-        {"answer": "最终的自然语言回答"}
-        ```
+5.  **处理与循环**:
+    *   **每当收到任何外部结果 (无论是Schema查询结果还是SQL数据查询结果)**:
+        *   **记录并累积**新获取的信息（DB结构详情或数据内容）。
+        *   **必须返回步骤2 (分析决策)**，利用包含刚收到信息在内的所有当前已知信息，重新进行评估，并决定下一步的输出。
 
-# 严格输出要求
-*   **所有响应必须是纯JSON**。
-*   **严禁**在JSON外添加任何字符、解释、注释。
-*   输出格式**仅限**：`{"action": ...}`、`{"sql": ...}` 或 `{"answer": ...}`。
+# 严格输出要求 (再次强调)
+*   **所有响应必须是纯JSON格式。** 严禁在JSON结构之外添加任何字符、解释或注释。
+*   **输出格式严格限定为步骤3中明确列出的几种之一。** Key的名称和结构必须完全一致。
+*   **坚决执行多轮交互逻辑：**无论是Schema信息的探查，还是为了回答用户问题而进行的数据收集，都可能需要多轮次操作。**不要期望通过单次查询解决所有复杂问题，尤其是数据获取。**
 """
 
 # 自然语言查数据库
@@ -927,7 +932,14 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
     while retries < max_retries:
         retries += 1
         try:
-            response = ollama_client.chat(model=model, messages=messages, options={"response_format": {"type": "json_object"}})
+            response = ollama_client.chat(
+                model=model, 
+                messages=messages, 
+                options={
+                    "response_format": {"type": "json_object"}, 
+                    "num_ctx": 13800
+                }
+            )
             ollama_response_str = response["message"]["content"]
             logger.info(f"Ollama Raw Response ({retries}): {ollama_response_str}")
 
@@ -935,20 +947,20 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
             cleaned_response_str = re.sub(r'<think>.*?</think>', '', ollama_response_str, flags=re.DOTALL).strip()
             cleaned_response_str = re.sub(r'^```(?:json)?\s*', '', cleaned_response_str)
             cleaned_response_str = re.sub(r'\s*```$', '', cleaned_response_str).strip()
-            logger.info(f"Cleaned Response ({retries}): {cleaned_response_str}")
+            logger.info(f"Ollama Cleaned Response ({retries}): {cleaned_response_str}")
 
             try:
                 ollama_response = json.loads(cleaned_response_str)
             except json.JSONDecodeError:
-                logger.error(f"无效的 JSON 响应: {cleaned_response_str}")
+                logger.error(f"无效的 JSON 响应: {cleaned_response_str[:20]}...")
                 error_message_to_model = {
-                    "error": "Invalid JSON response received",
+                    "error": "错误的json输出格式,输出的响应必须符合输出格式",
                     "details": cleaned_response_str
                 }
                 messages.append({"role": "user", "content": json.dumps(error_message_to_model)})
                 continue
 
-            messages.append({"role": "assistant", "content": cleaned_response_str})
+            messages.append({"role": "assistant", "content": ollama_response_str})
 
             if 'action' in ollama_response:
                 action = ollama_response['action']
@@ -981,7 +993,6 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
 
             elif 'sql' in ollama_response:
                 sql_query = ollama_response['sql']
-                logger.info(f"Executing SQL: {sql_query}")
                 success, result_data = execute_sql(sql_query)
                 db_result_payload = {
                     "sql": sql_query,
@@ -992,7 +1003,6 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
 
             elif 'answer' in ollama_response:
                 final_answer = ollama_response['answer']
-                logger.info(f"最终回答: {final_answer}")
                 return True, final_answer
             else:
                 logger.error(f"无法处理的 JSON 格式: {cleaned_response_str}")
@@ -1254,28 +1264,27 @@ with gr.Blocks() as demo:
                     )
                     sql_btn = gr.Button("发送")
                     sql_output = gr.Markdown(label="查询结果")
-                    sql_error = gr.Textbox(label="错误信息", visible=False)
 
                     def update_sql(query, model):
                         logger.info(f"处理查询: {query}, 模型: {model}")
                         if not query.strip():
-                            logger.info("空查询，返回错误")
-                            return "", "错误: 请输入有效查询", ""
+                            logger.warning("空查询")
+                            return "**错误: 请输入有效查询**", query
                         success, result = nl_to_sql(query, model)
                         logger.info(f"nl_to_sql 返回: success={success}, result={result}")
                         if success:
-                            return result, "", ""
-                        return "", result, ""
+                            return result, query
+                        return result, query
 
                     sql_input.submit(
                         update_sql,
                         inputs=[sql_input, sql_model_select],
-                        outputs=[sql_output, sql_error, sql_input]
+                        outputs=[sql_output, sql_input]
                     )
                     sql_btn.click(
                         update_sql,
                         inputs=[sql_input, sql_model_select],
-                        outputs=[sql_output, sql_error, sql_input]
+                        outputs=[sql_output, sql_input]
                     )
 
         with gr.Row():
