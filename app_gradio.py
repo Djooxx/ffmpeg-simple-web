@@ -914,7 +914,7 @@ SQL_SYSTEM_PROMPT = """
 """
 
 # 自然语言查数据库
-def nl_to_sql(query: str, model: str = "llama3") -> Tuple[bool, str]:
+def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
     logger.info(f"接收到用户查询: {query}")
     logger.info(f"使用模型: {model}")
     max_retries = 50
@@ -1010,7 +1010,7 @@ def nl_to_sql(query: str, model: str = "llama3") -> Tuple[bool, str]:
     logger.error("无法在指定次数内获取有效答案")
     return False, "错误: 无法在指定次数内获取有效答案"
 
-def analyze_videos(frame: np.ndarray): # 为frame添加类型提示
+def analyze_videos(frame: np.ndarray, model: str): # 为frame添加类型提示
     if frame is None:
         print("错误：输入的帧为 None，无法处理。")
         return None # 对于 output_img 组件返回 None
@@ -1035,16 +1035,15 @@ def analyze_videos(frame: np.ndarray): # 为frame添加类型提示
         messages = [
             {
                 "role": "user",
-                "content": "请分析图片中的内容，简短描述图片上有什么。",
+                "content": "你是一个实时视频分析助手。请分析当前视频帧，输出一句中文，简洁描述主要内容，突出关键物体或场景。",
                 "images": [base64_string]  # 直接传递 base64 字符串
             }
         ]
         # 调用 Ollama 模型
-        model = "gemma3:12b-it-qat"
         response = ollama_client.chat(model=model, messages=messages)
         # 提取 Ollama 的回复
         ollama_result = response.get("message", {}).get("content", "Ollama 未返回有效结果")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ollama 分析结果: {ollama_result[:20]}...")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ollama 分析结果: {ollama_result[:40]}...")
         return ollama_result
     except cv2.error as e:
         print(f"OpenCV 错误：无法处理. 错误信息: {e}")
@@ -1058,6 +1057,8 @@ def analyze_videos(frame: np.ndarray): # 为frame添加类型提示
 with gr.Blocks() as demo:
     gr.Markdown("# 音视频处理工具 (Gradio版)")
     gr.Markdown("提供视频/音频处理、语音识别、文字转语音、SRT处理、大语言模型聊天和自然语言数据库查询功能。")
+
+    model_choices = get_ollama_models()
     with gr.TabItem("视频工具"):
         with gr.Row():
             with gr.Column(scale=1):
@@ -1066,7 +1067,6 @@ with gr.Blocks() as demo:
                         video_url_input = gr.Textbox(label="视频URL (例如 B站, YouTube)", placeholder="请输入视频链接...")
                         # ---- START: Place dropdowns in a new Row ----
                         with gr.Row():
-                            model_choices = get_ollama_models()
                             ollama_model_dropdown_video = gr.Dropdown(
                                     label="选择模型",
                                     choices=model_choices,
@@ -1241,7 +1241,6 @@ with gr.Blocks() as demo:
             with gr.Column(scale=1):
                 with gr.Group():
                     gr.Markdown("## 自然语言查数据库")
-                    model_choices = get_ollama_models()
                     sql_model_select = gr.Dropdown(
                         label="选择模型",
                         choices=model_choices,
@@ -1285,7 +1284,6 @@ with gr.Blocks() as demo:
                     gr.Markdown("## 大语言模型音频聊天")
                     # ---- START: Place dropdowns in a new Row ----
                     with gr.Row():
-                        model_choices = get_ollama_models()
                         model_select = gr.Dropdown(label="选择模型", choices=model_choices, value="qwen3:14b" if model_choices else None, interactive=True)
                         chat_voice_select = gr.Dropdown(
                             label="选择音色",
@@ -1344,14 +1342,15 @@ with gr.Blocks() as demo:
                 status_message = gr.Markdown(
                     label="分析结果"
                 )
-
+        with gr.Row():
+            model_select = gr.Dropdown(label="选择模型", choices=model_choices, allow_custom_value=False, value="qwen2.5vl:3b-q8_0" if model_choices else None, interactive=True)
         dep = input_img.stream(
             fn=analyze_videos, 
-            inputs=[input_img], # 或者直接 inputs=input_img
+            inputs=[input_img, model_select],
             outputs=[status_message],
-            stream_every=5,     # 目标更新频率:值越小，请求越频繁，对性能要求越高。(参数必须是stream_every)
+            stream_every=0.1,     # 发送频率:值越小，请求越频繁，待上一次结果返回后,发起下一次请求.(参数必须是stream_every)
             concurrency_limit=1, # 限制并发数为1，逐帧处理。
-            time_limit=5    # 如果函数可能卡死，可以保留。
+            time_limit=0.8    # 后端最长处理时间
         )
 # 启动Gradio应用
 demo.launch(server_port=7860, debug=True)
