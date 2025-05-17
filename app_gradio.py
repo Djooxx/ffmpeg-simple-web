@@ -954,10 +954,14 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
             except json.JSONDecodeError:
                 logger.error(f"无效的 JSON 响应: {cleaned_response_str[:20]}...")
                 error_message_to_model = {
-                    "error": "错误的json输出格式,输出的响应必须符合输出格式",
-                    "details": cleaned_response_str
+                    "error": "错误的json输出格式,输出的响应必须符合输出格式且为合法的JSON",
+                    "details": f"Your previous response was: '{cleaned_response_str[:200]}...' which is not valid JSON. Please ensure your entire response is a single, valid JSON object matching the required schema."
                 }
-                messages.append({"role": "user", "content": json.dumps(error_message_to_model)})
+                # 将原始错误响应（如果有）和格式修正请求添加到消息历史
+                messages.append({"role": "assistant", "content": cleaned_response_str}) 
+                messages.append({"role": "user", "content": json.dumps(error_message_to_model, ensure_ascii=False)})
+                if retries >= max_retries: # 如果在最后一次尝试时发生JSON解码错误
+                    return False, f"错误: 达到最大重试次数，仍无法解析JSON响应。最后一次错误响应: {cleaned_response_str}"
                 continue
 
             messages.append({"role": "assistant", "content": ollama_response_str})
