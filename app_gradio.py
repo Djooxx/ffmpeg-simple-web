@@ -1366,4 +1366,4 @@ with gr.Blocks() as demo:
             time_limit=0.8    # 后端最长处理时间
         )
 # 启动Gradio应用
-demo.launch(server_port=7860, debug=True)
+demo.launch(server_port=7860, inbrowser=True)
