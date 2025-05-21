@@ -128,13 +128,16 @@ def chat_with_ollama():
         if response.status_code == 200:
             result = response.json()
             assistant_message = result.get('message', {}).get('content', '')
-            
+            cleaned_response_str = re.sub(r'<think>.*?</think>', '', assistant_message, flags=re.DOTALL).strip()
+            # 移除常见的 Markdown 代码块标记 (```json ... ```, ``` ... ```)
+            cleaned_response_str = re.sub(r'^```(?:json)?s*', '', cleaned_response_str)
+            cleaned_response_str = re.sub(r's*```$', '', cleaned_response_str).strip()
             # 将助手回复添加到消息历史中
-            messages.append({"role": "assistant", "content": assistant_message})
+            messages.append({"role": "assistant", "content": cleaned_response_str})
             
             return jsonify({
                 'success': True, 
-                'response': assistant_message,
+                'response': cleaned_response_str,
                 'messages': messages  # 返回更新后的消息历史
             })
         else:

@@ -319,17 +319,17 @@ function processRecording() {
             // 移除处理中的消息
             removeTempMessages();
             
-            // 显示识别出的文字
             const userText = data.text;
             console.log('语音识别成功，文本:', userText);
-            if (userText.trim()) {
+            if (userText.trim() && !/^[\s.,!?;，。！？；]*$/.test(userText)) {
+                // 显示识别出的文字
                 updateChatHistory(userText, 'user');
                 
                 // 发送文字到Ollama进行对话
                 console.log('准备发送文本到Ollama进行对话');
                 chatWithOllama(userText);
             } else {
-                console.log('识别结果为空，不发送到Ollama');
+                console.log('识别结果为空或仅包含标点，不发送到Ollama');
             }
         } else {
             console.error('语音识别失败:', data.error);
