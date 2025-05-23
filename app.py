@@ -546,7 +546,7 @@ def generate_audio_data(text, voice):
             sentences = [text]
         # 创建结果列表，并确保过滤掉任何空字符串、仅包含空白字符或仅包含标点符号的情况
         # 使用正则表达式检查是否只包含标点符号
-        punctuation_pattern = r'^[\s。;；!！?？….,，、\-()“”"‘’\'*]+$'
+        punctuation_pattern = r'^[\s。;；!！?？….,，、\-()“”"‘’\'*`]+$'
         texts = [(sentence.strip(),) for sentence in sentences if sentence.strip() and not re.match(punctuation_pattern, sentence.strip())]
         # 打印结果
         print(texts)
