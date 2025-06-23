@@ -194,7 +194,7 @@ def get_video_info(video_path: str) -> str:
         minutes = int((duration % 3600) // 60)
         seconds = int(duration % 60)
         duration_str = f"{hours}小时 {minutes}分钟 {seconds}秒"
-        size = format_info["size"] if int(format_info["size"]) > 0 else os.path.getsize(video_path)
+        size = os.path.getsize(video_path)
         bitrate = (float(format_info["bit_rate"]) / 1000000) if "bit_rate" in format_info else "未知"
         frame_rate = eval(stream["avg_frame_rate"]) if stream.get("avg_frame_rate") else "未知"
         return f"""
@@ -474,6 +474,7 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                 'noplaylist': True,
                 'quiet': False,
                 'no_warnings': False,
+                # 'proxy': 'http://127.0.0.1:7890',  # 添加代理设置
             }
             downloaded_audio_path = None
             with YoutubeDL(ydl_opts) as ydl:
