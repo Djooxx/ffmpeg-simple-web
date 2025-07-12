@@ -187,25 +187,27 @@ def get_video_info(video_path: str) -> str:
         return f"路径不是文件"
     try:
         probe = ffmpeg.probe(video_path)
-        format_info = probe["format"]
-        stream = probe["streams"][0]
-        duration = float(format_info["duration"])
-        hours = int(duration // 3600)
-        minutes = int((duration % 3600) // 60)
-        seconds = int(duration % 60)
-        duration_str = f"{hours}小时 {minutes}分钟 {seconds}秒"
-        size = os.path.getsize(video_path)
-        bitrate = (float(format_info["bit_rate"]) / 1000000) if "bit_rate" in format_info else "未知"
-        frame_rate = eval(stream["avg_frame_rate"]) if stream.get("avg_frame_rate") else "未知"
-        return f"""
-        **视频信息**
-        - 时长: {duration_str}
-        - 文件大小: {convert_size(int(size))}
-        - 分辨率: {stream["width"]}x{stream["height"]}
-        - 编码格式: {stream["codec_name"]}
-        - 比特率: {bitrate:.2f} Mbps
-        - 帧率: {frame_rate} fps
-        """
+        for stream in probe["streams"]:
+            if stream["codec_type"] in ["video"]:
+                format_info = probe["format"]
+                duration = float(format_info["duration"])
+                hours = int(duration // 3600)
+                minutes = int((duration % 3600) // 60)
+                seconds = int(duration % 60)
+                duration_str = f"{hours}小时 {minutes}分钟 {seconds}秒"
+                size = os.path.getsize(video_path)
+                bitrate = (float(format_info["bit_rate"]) / 1000000) if "bit_rate" in format_info else "未知"
+                frame_rate = eval(stream["avg_frame_rate"]) if stream.get("avg_frame_rate") else "未知"
+                return f"""
+                **视频信息**
+                - 时长: {duration_str}
+                - 文件大小: {convert_size(int(size))}
+                - 分辨率: {stream["width"]}x{stream["height"]}
+                - 编码格式: {stream["codec_name"]}
+                - 比特率: {bitrate:.2f} Mbps
+                - 帧率: {frame_rate} fps
+                """
+        return f"错误: 未识别到视频流"        
     except Exception as e:
         return f"错误: {str(e)}"
 
@@ -383,7 +385,10 @@ def convert_video(video_path: str, output_format: str) -> str:
 
         # 执行命令
         ffmpeg.run(stream)
-        return f"视频转换成功！保存路径：{output_path}"
+        return f"""
+        视频转换成功！保存路径：
+        {output_path}
+        """
     except Exception as e:
         return f"错误: {str(e)}"
 
