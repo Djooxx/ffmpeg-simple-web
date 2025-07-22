@@ -1029,20 +1029,17 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
     logger.error("无法在指定次数内获取有效答案")
     return False, "错误: 无法在指定次数内获取有效答案"
 
-def analyze_videos(frame: np.ndarray, model: str): # 为frame添加类型提示
+def analyze_videos(frame: np.ndarray, model: str, history: list): # 为frame添加类型提示
     if frame is None:
         print("错误：输入的帧为 None，无法处理。")
-        return None # 对于 output_img 组件返回 None
+        # Return current history and an empty HTML update
+        return history, "无新分析结果"
 
-    timestamp_ms = int(time.time() * 1000)
-    
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing frame, will work")
 
     try:
         # 校正图像方向：
-        # flipCode = 0：垂直翻转（上下）。
         # flipCode = 1：水平翻转（左右）。
-        # flipCode = -1：同时水平和垂直翻转（相当于 180° 旋转）。
         frame = cv2.flip(frame, 1)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
@@ -1062,14 +1059,30 @@ def analyze_videos(frame: np.ndarray, model: str): # 为frame添加类型提示
         response = ollama_client.chat(model=model, messages=messages)
         # 提取 Ollama 的回复
         ollama_result = response.get("message", {}).get("content", "Ollama 未返回有效结果")
+
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ollama 分析结果: {ollama_result[:40]}...")
-        return ollama_result
+        
+        # 更新历史记录
+        new_history = [f"[{time.strftime('%H:%M:%S')}] {ollama_result}"] + history
+        if len(new_history) > 5:
+            new_history = new_history[:5]
+
+        # 格式化为 HTML 输出
+        html_output = ""
+        for i, result in enumerate(new_history):
+            if i == 0:
+                # 高亮最新结果
+                html_output += f'<p style="background-color: #e0f7fa; color: #006064; padding: 8px; border-radius: 5px; margin-bottom: 5px;"><strong>最新:</strong> {result}</p>'
+            else:
+                html_output += f'<p style="background-color: #f1f1f1; padding: 8px; border-radius: 5px; margin-bottom: 5px;">{result}</p>'
+        
+        return new_history, html_output
     except cv2.error as e:
         print(f"OpenCV 错误：无法处理. 错误信息: {e}")
-        return None 
+        return history, f"OpenCV 错误: {e}"
     except Exception as e:
         print(f"发生未知错误：无法处理. 错误信息: {e}")
-        return None 
+        return history, f"未知错误: {e}" 
 
 
 # Gradio界面
@@ -1352,20 +1365,20 @@ with gr.Blocks() as demo:
                     )
 
     with gr.TabItem("实时视频分析"):
-        gr.Markdown("### Real time video")
+        analysis_history = gr.State([])
         with gr.Row():
             with gr.Column(scale=1):
                 input_img = gr.Image(sources=["webcam"], type="numpy", label="Webcam Input",  mirror_webcam=False)
             with gr.Column(scale=1):
-                status_message = gr.Markdown(
+                status_message = gr.HTML(
                     label="分析结果"
                 )
         with gr.Row():
             model_select = gr.Dropdown(label="选择模型", choices=model_choices, allow_custom_value=False, value="qwen2.5vl:3b-q8_0" if model_choices else None, interactive=True)
         dep = input_img.stream(
             fn=analyze_videos, 
-            inputs=[input_img, model_select],
-            outputs=[status_message],
+            inputs=[input_img, model_select, analysis_history],
+            outputs=[analysis_history, status_message],
             stream_every=0.1,     # 发送频率:值越小，请求越频繁，待上一次结果返回后,发起下一次请求.(参数必须是stream_every)
             concurrency_limit=1, # 限制并发数为1，逐帧处理。
             time_limit=0.8    # 后端最长处理时间
