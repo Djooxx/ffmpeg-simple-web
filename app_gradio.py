@@ -722,7 +722,7 @@ def execute_sql(sql_query):
     """执行 SQL 查询并返回结果"""
     conn = None
     cursor = None
-    logger.info(f"Executing SQL: {sql_query}")
+    logger.info(f"开始执行 SQL: {sql_query}")
     try:
         conn = get_db_connection()
         if conn is None:
@@ -738,7 +738,7 @@ def execute_sql(sql_query):
             except TypeError as e:
                 logger.warning(f"JSON 序列化错误: {e}, 将返回原始结果列表")
                 result_json = str(result)
-            logger.info(f"SQL Result (JSON): {result_json}")
+            logger.info(f"执行sql结果 (JSON): {result_json}")
             return True, result_json
         else:
             conn.commit()
@@ -761,7 +761,7 @@ def execute_sql(sql_query):
 
 def get_tables():
     """获取数据库中的所有表名"""
-    logger.info("Calling get_tables()")
+    logger.info("开始执行获取数据库中的所有表名 get_tables()")
     conn = None
     cursor = None
     try:
@@ -781,7 +781,7 @@ def get_tables():
         logger.info(f"当前数据库: {db_name}")
         cursor.execute("SHOW TABLES")
         tables = [table[0] for table in cursor.fetchall()]
-        logger.info(f"Found tables: {tables}")
+        logger.info(f"表名查询结果: {tables}")
         return True, tables
     except mysql.connector.Error as err:
         error_msg = f"获取表列表错误: {err}"
@@ -796,11 +796,11 @@ def get_tables():
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
-        logger.info("Exiting get_tables()")
+        logger.info("表名查询结束 get_tables()")
 
 def get_columns(table_name):
     """获取指定表的列信息"""
-    logger.info(f"Calling get_columns(table_name='{table_name}')")
+    logger.info(f"开始获取表'{table_name}'的列信息 get_columns(table_name='{table_name}')")
     conn = None
     cursor = None
     try:
@@ -816,7 +816,7 @@ def get_columns(table_name):
             error_msg = f"表 '{table_name}' 不存在或没有列"
             logger.warning(error_msg)
             return False, error_msg
-        logger.info(f"Found columns for '{table_name}': {columns}")
+        logger.info(f"查询到列信息 '{table_name}': {columns}")
         return True, columns
     except mysql.connector.Error as err:
         error_msg = f"获取列信息错误: {err}"
@@ -833,11 +833,11 @@ def get_columns(table_name):
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
-        logger.info(f"Exiting get_columns(table_name='{table_name}')")
+        logger.info(f"列信息查询结束 get_columns(table_name='{table_name}')")
 
 def get_create_table_statement(table_name):
     """获取指定表的 CREATE TABLE 语句"""
-    logger.info(f"Calling get_create_table_statement(table_name='{table_name}')")
+    logger.info(f"开始查询表'{table_name}'的 CREATE TABLE 语句 get_create_table_statement(table_name='{table_name}')")
     conn = None
     cursor = None
     try:
@@ -851,7 +851,7 @@ def get_create_table_statement(table_name):
         result = cursor.fetchone()
         if result:
             create_statement = result[1]
-            logger.info(f"Success for '{table_name}'")
+            logger.info(f"查询建表语句成功 '{table_name}'")
             return True, create_statement
         else:
             error_msg = f"无法获取表 '{table_name}' 的 CREATE TABLE 语句"
@@ -872,69 +872,50 @@ def get_create_table_statement(table_name):
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
-        logger.info(f"Exiting get_create_table_statement(table_name='{table_name}')")
+        logger.info(f"查询建表结束 get_create_table_statement(table_name='{table_name}')")
 
 # SQL 生成的系统提示 (Qwen3-Coder版)
 SQL_SYSTEM_PROMPT = """
-# 角色定义
-你是一个专门将自然语言(NL)转换为MySQL查询的AI代理。
+# 核心指令
+你是一个专门将自然语言转换为MySQL的AI代理。你的唯一任务是严格遵循JSON I/O格式，通过一个定义好的工作流程来响应用户请求。
 
-# 核心目标
-通过一系列严格的JSON交互，逐步探索数据库模式(Schema)、查询所需数据，并最终准确回答用户的初始问题。
+# 核心规则 (必须遵守)
+1.  **JSON唯一**: 你的所有输出**必须**是纯粹的、单一的JSON对象，禁止包含任何解释性文本、注释或Markdown标记。
+2.  **严禁推测**: 在未通过`action`明确探知表名和列名之前，**绝不**允许生成任何`sql`查询。
+3.  **单步执行**: 每次交互只允许输出一个JSON指令。
+4.  **状态感知**: 你的每个决策都必须基于到目前为止的全部交互历史（用户问题、Schema信息、已有数据）。
+4.  **严禁省略**: 如实返回查询到的完整结果,禁止使用'等'省略部分数据。
 
-# 决策流程 (严格按优先级执行)
-在每一步交互中，你必须基于 **用户问题**、**已知的库表结构** 和 **已查询到的数据** 做出唯一决策。
+# 工作流程 (严格按序执行)
+你必须按照以下优先级顺序决策，并输出对应的JSON：
 
-## 1. 模式(Schema)探索 (最高优先级)
-在生成任何数据查询SQL之前，必须完全明确所需的表和列。
+1.  **Schema探索 (最高优先级)**
+    *   **条件**: 尚未完全掌握回答问题所需的表和列。
+    *   **输出**:
+        *   `{"action": "show_tables"}` (如果表未知)
+        *   `{"action": "show_columns", "table_name": "已知的表名"}` (如果列未知)
+        *   `{"action": "show_create_table", "table_name": "已知的表名"}` (如果需要列的详细定义)
 
-*   **若所需表名未知**:
-    *   输出: `{"action": "show_tables"}`
-*   **若所需列名未知**:
-    *   输出: `{"action": "show_columns", "table_name": "已确认的表名"}`
-*   **若需要列的详细定义(如数据类型、约束)**:
-    *   输出: `{"action": "show_create_table", "table_name": "已确认的表名"}`
+2.  **数据查询**
+    *   **条件**: Schema已明确，但需要更多数据来回答问题。
+    *   **输出**: `{"sql": "SELECT ... FROM ... WHERE ..."}`
 
-**注意**: 执行任一`action`后，需等待系统返回结果，更新已知信息，然后重新进入此决策流程。
+3.  **生成答案 (最终步骤)**
+    *   **条件**: 已获取所有必要数据，或因任何原因无法继续查询。
+    *   **输出**: `{"answer": "在此处提供最终的自然语言答案，或解释为何无法回答。"}`
 
-## 2. 数据查询 (前提：Schema已知)
-当所需表和列均已明确时，方可生成SQL查询语句。
+# I/O 规范
 
-*   **若数据不完整**:
-    *   输出: `{"sql": "SELECT ... WHERE ..."}`
-*   **循环**: 此步骤可能需要多次执行。根据前一次查询结果，生成下一条SQL以获取剩余必要信息。
-
-## 3. 生成最终答案 (最终步骤)
-当所有必需数据均已获取时，生成最终回答。
-
-*   **若数据充足**:
-    *   输出: `{"answer": "针对用户问题的完整、准确的自然语言回答。"}`
-*   **若数据不足或查询失败**:
-    *   输出: `{"answer": "基于现有信息的最佳回答。[明确指出无法确定的部分及其原因]"}`
-*   **若用户问题因任何原因无法回答**:
-    *   输出: `{"answer": "无法回答该问题。[简要说明原因，例如：缺少相关表/数据/权限]"}`
-    
-# I/O 规范 (强制遵守)
-
-### 你的每次输出 (必须是以下五种JSON格式之一)
+### 你的输出 (必须是以下五种JSON格式之一)
 1.  `{"action": "show_tables"}`
-2.  `{"action": "show_columns", "table_name": "表名"}`
-3.  `{"action": "show_create_table", "table_name": "表名"}`
-4.  `{"sql": "有效的SELECT SQL语句"}`
-5.  `{"answer": "自然语言回答或无法回答的说明"}`
+2.  `{"action": "show_columns", "table_name": "..."}`
+3.  `{"action": "show_create_table", "table_name": "..."}`
+4.  `{"sql": "有效的SELECT语句"}`
+5.  `{"answer": "自然语言回答或状态说明"}`
 
 ### 你收到的输入 (JSON格式)
-*   **初始请求**: `{"question": "用户的自然语言问题"}`
-*   **系统响应**: 
-    *   Action结果: `{"action": "...", "result": [...]}` 
-    *   SQL结果: `{"sql": "...", "result": "查询结果字符串或错误信息"}`
-
-# 核心约束 (必须严格遵守)
-1.  **纯JSON输出**: 你的回复只能是规定的JSON格式，不允许有任何额外的解释性文字或标记。
-2.  **零猜测原则**: 绝不允许在未通过`action`明确确认表名和列名的情况下编写`sql`。
-3.  **单步执行**: 每次交互只允许输出一个指令。将复杂任务分解为多个步骤。
-4.  **全局状态感知**: 每次决策都必须综合考虑所有历史交互中获得的信息。
-5.  **健壮性**: 必须能够处理空结果、错误信息等异常情况，并给出相应的`answer`。
+*   **初始**: `{"question": "用户的自然语言问题"}`
+*   **后续**: `{"action": "...", "result": [...]}` 或 `{"sql": "...", "result": "..."}`
 """
 # 自然语言查数据库
 def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
@@ -956,17 +937,16 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
                 options={
                     "response_format": {"type": "json_object"}, 
                     "num_ctx": 13800
-                },
-                think=True
+                }
             )
             ollama_response_str = response["message"]["content"]
-            logger.info(f"Ollama Raw Response ({retries}): {ollama_response_str}")
+            logger.info(f"Ollama 原始回复({retries}): {ollama_response_str}")
 
             # 清理响应
             cleaned_response_str = re.sub(r'<think>.*?</think>', '', ollama_response_str, flags=re.DOTALL).strip()
             cleaned_response_str = re.sub(r'^```(?:json)?\s*', '', cleaned_response_str)
             cleaned_response_str = re.sub(r'\s*```$', '', cleaned_response_str).strip()
-            logger.info(f"Ollama Cleaned Response ({retries}): {cleaned_response_str}")
+            logger.info(f"Ollama 格式化回复 ({retries}): {cleaned_response_str}")
 
             try:
                 ollama_response = json.loads(cleaned_response_str)
