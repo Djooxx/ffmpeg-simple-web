@@ -935,13 +935,14 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
                 model=model, 
                 messages=messages, 
                 options={
-                    "response_format": {"type": "json_object"}, 
-                    "num_ctx": 13800
+                    "response_format": {"type": "json_object"}
                 }
             )
             ollama_response_str = response["message"]["content"]
             logger.info(f"Ollama 原始回复({retries}): {ollama_response_str}")
-
+            if not ollama_response_str:
+                logger.warning("Ollama 原始回复字符串为空")
+                continue
             # 清理响应
             cleaned_response_str = re.sub(r'<think>.*?</think>', '', ollama_response_str, flags=re.DOTALL).strip()
             cleaned_response_str = re.sub(r'^```(?:json)?\s*', '', cleaned_response_str)
