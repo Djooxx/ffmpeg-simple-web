@@ -99,7 +99,7 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
                     sentences.append(sentence)
         else:
             sentences = [text]
-        punctuation_pattern = r'^[\s。;；!！?？….,，、\-()（）“”"‘’\'*`\u2018\u2019\u201c\u201d\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]+$'
+        punctuation_pattern = r'^[\s。;|；!！?>？….,，、\-()（）“”"‘’\'*`\u2018\u2019\u201c\u201d\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]+$'
         texts = [(sentence.strip(),) for sentence in sentences if sentence.strip() and not re.match(punctuation_pattern, sentence.strip())]
         if not texts:
             logger.info("没有有效文本内容，跳过音频生成")
