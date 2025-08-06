@@ -29,6 +29,7 @@ from urllib.parse import urlparse, urlunparse
 from kokoro import KModel, KPipeline  # 需确认实际导入方式
 import cv2
 import base64
+import openai
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 # 全局Ollama客户端实例
@@ -639,6 +640,58 @@ def get_ollama_models() -> List[str]:
     except Exception:
         return []
 
+
+OLLAMA_HOST = 'http://127.0.0.1:11434'
+LM_STUDIO_BASE_URL = "http://localhost:1234/v1"
+def get_all_models() -> List[str]:
+    """
+    获取本地 Ollama 和 LM Studio 上所有可用的模型。
+
+    此函数会分别尝试连接两个服务：
+    - 从 Ollama 获取的模型会以 'ollama:' 作为前缀。
+    - 从 LM Studio 获取的模型会以 'lms:' 作为前缀。
+    
+    如果某个服务无法连接，函数会打印一条错误信息但不会中断，
+    并继续尝试获取另一个服务中的模型。
+
+    Returns:
+        List[str]: 一个包含所有可用模型名称（带前缀）的列表。
+                   如果两个服务都无法访问，则返回一个空列表。
+    """
+    all_models = []
+
+    # --- 1. 尝试获取 Ollama 模型 ---
+    try:
+        print(f"正在尝试连接 Ollama 服务于 {OLLAMA_HOST}...")
+        client = ollama.Client(host=OLLAMA_HOST)
+        models_data = client.list()
+        
+        # 使用列表推导式为每个模型添加前缀并添加到主列表
+        ollama_models = [f"ollama:{model['model']}" for model in models_data["models"]]
+        all_models.extend(ollama_models)
+        print(f"成功从 Ollama 获取 {len(ollama_models)} 个模型。")
+
+    except Exception as e:
+        print(f"获取 Ollama 模型失败。请检查 Ollama 服务是否正在运行。错误: {e}")
+
+    # --- 2. 尝试获取 LM Studio 模型 ---
+    try:
+        print(f"正在尝试连接 LM Studio 服务于 {LM_STUDIO_BASE_URL}...")
+        # api_key 对于本地服务器不是必需的，但 openai 库要求提供
+        client = openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="not-needed")
+        response = client.models.list()
+        
+        # 为每个模型ID添加前缀并添加到主列表
+        lms_models = [f"lms:{model.id}" for model in response.data]
+        all_models.extend(lms_models)
+        print(f"成功从 LM Studio 获取 {len(lms_models)} 个模型。")
+
+    except Exception as e:
+        print(f"获取 LM Studio 模型失败。请检查 LM Studio 服务器是否已启动并在运行。错误: {e}")
+
+    return all_models
+
+
 def chat_with_ollama(message: str, model: str, voice: str, history: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, str]], Tuple[int, np.ndarray], str]:
     try:
         if not model:
@@ -902,7 +955,7 @@ SQL_SYSTEM_PROMPT = """
 
 3.  **生成答案 (最终步骤)**
     *   **条件**: 已获取所有必要数据，或因任何原因无法继续查询。
-    *   **输出**: `{"answer": "在此处提供最终的自然语言答案，或解释为何无法回答。"}`
+    *   **输出**: `{"answer": "在此处提供最终的自然语言答案，或解释为何无法回答。用标准markdown格式展示"}`
 
 # I/O 规范
 
@@ -919,8 +972,28 @@ SQL_SYSTEM_PROMPT = """
 """
 # 自然语言查数据库
 def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
+    """
+    将自然语言查询转换为 SQL，支持 Ollama 和 LM Studio。
+
+    Args:
+        query (str): 用户的自然语言查询。
+        model (str): 模型标识符，格式为 'prefix:model_name'。
+                     - 'ollama:model_name' (例如 'ollama:qwen:4b')
+                     - 'lms:model_name' (例如 'lms:local-model/gemma-2-9b-it-q8_0')
+                     LM Studio 中的模型名称通常可以在其本地服务器UI上找到。
+
+    Returns:
+        Tuple[bool, str]: 一个元组，第一个元素表示是否成功，第二个元素是最终答案或错误信息。
+    """
     logger.info(f"接收到用户查询: {query}")
-    logger.info(f"使用模型: {model}")
+    logger.info(f"使用模型字符串: {model}")
+
+    # 1. 解析模型字符串以确定服务类型和模型名称
+    try:
+        model_prefix, model_name = model.split(':', 1)
+    except ValueError:
+        return False, f"错误: 模型字符串 '{model}' 格式不正确。请使用 'ollama:model_name' 或 'lms:model_name' 的格式。"
+
     max_retries = 50
     retries = 0
     messages = [
@@ -931,43 +1004,66 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
     while retries < max_retries:
         retries += 1
         try:
-            response = ollama_client.chat(
-                model=model, 
-                messages=messages, 
-                options={
-                    "response_format": {"type": "json_object"}
-                }
-            )
-            ollama_response_str = response["message"]["content"]
-            logger.info(f"Ollama 原始回复({retries}): {ollama_response_str}")
-            if not ollama_response_str:
-                logger.warning("Ollama 原始回复字符串为空")
+            response_content_str = None
+
+            # 2. 根据前缀选择并调用相应的模型服务
+            if model_prefix == 'ollama':
+                logger.info(f"调用 Ollama (模型: {model_name})")
+                client = ollama.Client(host='http://127.0.0.1:11434')
+                response = client.chat(
+                    model=model_name, 
+                    messages=messages, 
+                    options={
+                        "response_format": {"type": "json_object"}
+                    }
+                )
+                response_content_str = response["message"]["content"]
+
+            elif model_prefix == 'lms':
+                logger.info(f"调用 LM Studio (模型: {model_name})")
+                # LM Studio 提供兼容 OpenAI 的接口，通常在 http://localhost:1234/v1
+                # API Key对于本地LM Studio不是必需的，但openai库要求提供
+                client = openai.OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
+                response = client.chat.completions.create(
+                    model=model_name, # 在LM Studio中，这通常指向已加载的模型
+                    messages=messages
+                )
+                response_content_str = response.choices[0].message.content
+            
+            else:
+                return False, f"错误: 不支持的模型前缀 '{model_prefix}'。请使用 'ollama' 或 'lms'。"
+
+            # --- 从这里开始，后续处理逻辑保持不变 ---
+            
+            logger.info(f"模型原始回复 ({retries}): {response_content_str}")
+            if not response_content_str:
+                logger.warning("模型原始回复字符串为空")
                 continue
-            # 清理响应
-            cleaned_response_str = re.sub(r'<think>.*?</think>', '', ollama_response_str, flags=re.DOTALL).strip()
+
+            # 清理响应 (这段逻辑对两种模型的返回都适用)
+            cleaned_response_str = re.sub(r'<think>.*?</think>', '', response_content_str, flags=re.DOTALL).strip()
             cleaned_response_str = re.sub(r'^```(?:json)?\s*', '', cleaned_response_str)
             cleaned_response_str = re.sub(r'\s*```$', '', cleaned_response_str).strip()
-            logger.info(f"Ollama 格式化回复 ({retries}): {cleaned_response_str}")
+            logger.info(f"模型格式化回复 ({retries}): {cleaned_response_str}")
 
             try:
-                ollama_response = json.loads(cleaned_response_str)
+                model_response_json = json.loads(cleaned_response_str)
             except json.JSONDecodeError:
-                logger.error(f"无效的 JSON 响应: {cleaned_response_str[:20]}...")
+                logger.error(f"无效的 JSON 响应: {cleaned_response_str[:200]}...")
                 error_message_to_model = {
                     "error": "错误的json输出格式,输出的响应必须符合输出格式且为合法的JSON",
                     "details": f"Your previous response was: '{cleaned_response_str[:200]}...' which is not valid JSON. Please ensure your entire response is a single, valid JSON object matching the required schema."
                 }
-                # 将原始错误响应（如果有）和格式修正请求添加到消息历史
                 messages.append({"role": "assistant", "content": cleaned_response_str}) 
                 messages.append({"role": "user", "content": json.dumps(error_message_to_model, ensure_ascii=False)})
-                if retries >= max_retries: # 如果在最后一次尝试时发生JSON解码错误
+                if retries >= max_retries:
                     return False, f"错误: 达到最大重试次数，仍无法解析JSON响应。最后一次错误响应: {cleaned_response_str}"
                 continue
 
-            messages.append({"role": "assistant", "content": ollama_response_str})
+            messages.append({"role": "assistant", "content": cleaned_response_str})
 
-            if 'action' in ollama_response:
-                action = ollama_response['action']
+            if 'action' in model_response_json:
+                action = model_response_json['action']
                 db_result_payload = {"action": action}
                 success = False
                 result_data = None
@@ -975,14 +1071,14 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
                 if action == 'show_tables':
                     success, result_data = get_tables()
                 elif action == 'show_columns':
-                    table_name = ollama_response.get('table_name')
+                    table_name = model_response_json.get('table_name')
                     if table_name:
                         db_result_payload['table_name'] = table_name
                         success, result_data = get_columns(table_name)
                     else:
                         result_data = "错误：'show_columns' 动作需要 'table_name' 参数"
                 elif action == 'show_create_table':
-                    table_name = ollama_response.get('table_name')
+                    table_name = model_response_json.get('table_name')
                     if table_name:
                         db_result_payload['table_name'] = table_name
                         success, result_data = get_create_table_statement(table_name)
@@ -995,8 +1091,8 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
                 messages.append({"role": "user", "content": json.dumps(db_result_payload)})
                 continue
 
-            elif 'sql' in ollama_response:
-                sql_query = ollama_response['sql']
+            elif 'sql' in model_response_json:
+                sql_query = model_response_json['sql']
                 success, result_data = execute_sql(sql_query)
                 db_result_payload = {
                     "sql": sql_query,
@@ -1005,8 +1101,8 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
                 messages.append({"role": "user", "content": json.dumps(db_result_payload)})
                 continue
 
-            elif 'answer' in ollama_response:
-                final_answer = ollama_response['answer']
+            elif 'answer' in model_response_json:
+                final_answer = model_response_json['answer']
                 return True, final_answer
             else:
                 logger.error(f"无法处理的 JSON 格式: {cleaned_response_str}")
@@ -1270,7 +1366,7 @@ with gr.Blocks() as demo:
                     gr.Markdown("## 自然语言查数据库")
                     sql_model_select = gr.Dropdown(
                         label="选择模型",
-                        choices=model_choices,
+                        choices=get_all_models(),
                         value="qwen3:14b" if model_choices else None,
                         interactive=True
                     )
