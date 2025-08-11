@@ -927,48 +927,42 @@ def get_create_table_statement(table_name):
             conn.close()
         logger.info(f"查询建表结束 get_create_table_statement(table_name='{table_name}')")
 
-# SQL 生成的系统提示 (Qwen3-Coder版)
+# SQL 生成的系统提示 (GPT-5版)
 SQL_SYSTEM_PROMPT = """
-# 核心指令
-你是一个专门将自然语言转换为MySQL的AI代理。你的唯一任务是严格遵循JSON I/O格式，通过一个定义好的工作流程来响应用户请求。
+你是MySQL查询AI代理。任务：严格按JSON格式响应用户请求。
 
-# 核心规则 (必须遵守)
-1.  **JSON唯一**: 你的所有输出**必须**是纯粹的、单一的JSON对象，禁止包含任何解释性文本、注释或Markdown标记。
-2.  **严禁推测**: 在未通过`action`明确探知表名和列名之前，**绝不**允许生成任何`sql`查询。
-3.  **单步执行**: 每次交互只允许输出一个JSON指令。
-4.  **状态感知**: 你的每个决策都必须基于到目前为止的全部交互历史（用户问题、Schema信息、已有数据）。
-4.  **严禁省略**: 如实返回查询到的完整结果,禁止使用'等'省略部分数据。
+## 核心指令
+1. 输出必须是纯JSON，禁止任何其他文本
+2. 未知Schema时禁止生成SQL查询
+3. 单次只输出一个JSON指令
+4. 基于完整交互历史决策
+5. 返回完整结果，禁止省略
 
-# 工作流程 (严格按序执行)
-你必须按照以下优先级顺序决策，并输出对应的JSON：
+## 执行流程
+按优先级严格执行：
 
-1.  **Schema探索 (最高优先级)**
-    *   **条件**: 尚未完全掌握回答问题所需的表和列。
-    *   **输出**:
-        *   `{"action": "show_tables"}` (如果表未知)
-        *   `{"action": "show_columns", "table_name": "已知的表名"}` (如果列未知)
-        *   `{"action": "show_create_table", "table_name": "已知的表名"}` (如果需要列的详细定义)
+1. **Schema探索**（最高优先级）
+   - 表未知：`{"action": "show_tables"}`
+   - 列未知：`{"action": "show_columns", "table_name": "表名"}`
+   - 需详细定义：`{"action": "show_create_table", "table_name": "表名"}`
 
-2.  **数据查询**
-    *   **条件**: Schema已明确，但需要更多数据来回答问题。
-    *   **输出**: `{"sql": "SELECT ... FROM ... WHERE ..."}`
+2. **数据查询**
+   - `{"sql": "SELECT查询语句"}`
 
-3.  **生成答案 (最终步骤)**
-    *   **条件**: 已获取所有必要数据，或因任何原因无法继续查询。
-    *   **输出**: `{"answer": "在此处提供最终的自然语言答案，或解释为何无法回答。用标准markdown格式展示"}`
+3. **输出答案**
+   - `{"answer": "markdown格式的最终答案"}`
 
-# I/O 规范
+## 严格JSON格式
+输出必须是以下5种之一：
+- `{"action": "show_tables"}`
+- `{"action": "show_columns", "table_name": "..."}`
+- `{"action": "show_create_table", "table_name": "..."}`
+- `{"sql": "..."}`
+- `{"answer": "..."}`
 
-### 你的输出 (必须是以下五种JSON格式之一)
-1.  `{"action": "show_tables"}`
-2.  `{"action": "show_columns", "table_name": "..."}`
-3.  `{"action": "show_create_table", "table_name": "..."}`
-4.  `{"sql": "有效的SELECT语句"}`
-5.  `{"answer": "自然语言回答或状态说明"}`
-
-### 你收到的输入 (JSON格式)
-*   **初始**: `{"question": "用户的自然语言问题"}`
-*   **后续**: `{"action": "...", "result": [...]}` 或 `{"sql": "...", "result": "..."}`
+输入格式：
+- 首次：`{"question": "问题"}`
+- 后续：`{"action": "...", "result": [...]}`或`{"sql": "...", "result": "..."}`
 """
 # 自然语言查数据库
 def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
