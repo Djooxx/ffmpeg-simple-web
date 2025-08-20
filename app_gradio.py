@@ -57,14 +57,13 @@ logger.addHandler(handler)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 logger.info(f"使用设备: {device}")
 
-# 加载Kokoro模型
-model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
-en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=model_v1_0)
+
+is_init_kokoro = False
+en_pipeline = None  # 初始化为 None
+pipeline_v1_1 = None  # 初始化为 None
+pipeline_v1_0 = None  # 初始化为 None
 def en_callable(text):
-    return next(en_pipeline(text, voice='af_alloy')).phonemes
-model_v1_1 = KModel(repo_id='hexgrad/Kokoro-82M-v1.1-zh').to(device).eval()
-pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z', en_callable=en_callable, model=model_v1_1)
-pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable, model=model_v1_0)
+    return next(en_pipeline(text, voice='af_alloy')).phonemes;
 
 # 处理路径
 def process_path(path: str) -> str:
@@ -81,6 +80,15 @@ def speed_callable(len_ps: int) -> float:
 
 # 文字生成音频数据（kokoro）
 def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
+    global is_init_kokoro, en_pipeline, pipeline_v1_1, pipeline_v1_0
+    if not is_init_kokoro:
+        # 加载 Kokoro 模型
+        model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
+        en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=model_v1_0)
+        model_v1_1 = KModel(repo_id='hexgrad/Kokoro-82M-v1.1-zh').to(device).eval()
+        pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z', en_callable=en_callable, model=model_v1_1)
+        pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable, model=model_v1_0)
+        is_init_kokoro = True  # 设置初始化标志
     wavs = []
     try:
         if re.search(r'\d$', voice):
