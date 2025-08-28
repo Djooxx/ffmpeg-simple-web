@@ -1,3 +1,23 @@
+import logging
+# 设置日志
+logger = logging.getLogger(__name__)
+logger.propagate = False  # 关键：关闭继承传播
+logger.setLevel(logging.DEBUG)
+
+# 创建一个handler，用于将日志消息打印到控制台
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+
+# 创建一个formatter，然后添加到handler中
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+
+# 将handler添加到logger中
+logger.addHandler(handler)
+
+logger.info("启动服务中...")
+
+import time
 import os
 import json
 import re
@@ -15,7 +35,6 @@ import ollama
 from pathlib import Path
 import srt
 from datetime import timedelta
-import logging
 from typing import List, Tuple, Union
 import torch
 import tqdm
@@ -34,23 +53,6 @@ import openai
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 # 全局Ollama客户端实例
 ollama_client = ollama.Client(host='http://127.0.0.1:11434')
-# 设置日志
-
-logger = logging.getLogger(__name__)
-logger.propagate = False  # 关键：关闭继承传播
-logger.setLevel(logging.DEBUG)
-
-# 创建一个handler，用于将日志消息打印到控制台
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-
-# 创建一个formatter，然后添加到handler中
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-
-# 将handler添加到logger中
-
-logger.addHandler(handler)
 
 
 # 设备选择
@@ -83,12 +85,14 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
     global is_init_kokoro, en_pipeline, pipeline_v1_1, pipeline_v1_0
     if not is_init_kokoro:
         # 加载 Kokoro 模型
+        logger.info("加载 Kokoro 模型")
         model_v1_0 = KModel(repo_id='hexgrad/Kokoro-82M').to(device).eval()
         en_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M', model=model_v1_0)
         model_v1_1 = KModel(repo_id='hexgrad/Kokoro-82M-v1.1-zh').to(device).eval()
         pipeline_v1_1 = KPipeline(repo_id='hexgrad/Kokoro-82M-v1.1-zh', lang_code='z', en_callable=en_callable, model=model_v1_1)
         pipeline_v1_0 = KPipeline(repo_id='hexgrad/Kokoro-82M', lang_code='z', en_callable=en_callable, model=model_v1_0)
         is_init_kokoro = True  # 设置初始化标志
+        logger.info("加载 Kokoro 模型 完成")
     wavs = []
     try:
         if re.search(r'\d$', voice):
@@ -96,6 +100,7 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
         else:
             pipeline = pipeline_v1_0
         sentences = []
+        logger.info("文本清理中...")
         text = re.sub(r'\r\n|\n|\r', '。', text)
         if len(text) > 100:
             split_pattern = r'([。;；!！?？]|…|\.{2,})'
@@ -113,6 +118,7 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
         if not texts:
             logger.info("没有有效文本内容，跳过音频生成")
             return wavs
+        logger.info("文本清理完成")
         for paragraph in tqdm.tqdm(texts):
             for i, sentence in enumerate(paragraph):
                 logger.info(f"处理文字: {sentence}")
@@ -285,7 +291,7 @@ def get_target_video_bitrate(video_path):
             return '3M'
 
     except (json.JSONDecodeError, KeyError) as e:
-        print(f"无法获取 {video_path} 的分辨率，错误: {e}，默认使用 5M 比特率")
+        logger.error(f"无法获取 {video_path} 的分辨率，错误: {e}，默认使用 5M 比特率")
         return '5M'  # 默认比特率
 
 # 获取视频分辨率
@@ -305,7 +311,7 @@ def get_video_resolution(video_path):
         height = probe['streams'][0]['height']
         return width, height
     except (ffmpeg.Error, json.JSONDecodeError, KeyError, IndexError) as e:
-        print(f"无法获取 {video_path} 的分辨率，错误: {e}，默认使用 1920x1080")
+        logger.error(f"无法获取 {video_path} 的分辨率，错误: {e}，默认使用 1920x1080")
         return 1920, 1080
 
 # 音频提取
@@ -648,9 +654,8 @@ def get_ollama_models() -> List[str]:
     except Exception:
         return []
 
-
 OLLAMA_HOST = 'http://127.0.0.1:11434'
-LM_STUDIO_BASE_URL = "http://localhost:1234/v1"
+LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
 def get_all_models() -> List[str]:
     """
     获取本地 Ollama 和 LM Studio 上所有可用的模型。
@@ -670,32 +675,32 @@ def get_all_models() -> List[str]:
 
     # --- 1. 尝试获取 Ollama 模型 ---
     try:
-        print(f"正在尝试连接 Ollama 服务于 {OLLAMA_HOST}...")
+        logger.info(f"正在尝试连接 Ollama 服务于 {OLLAMA_HOST}...")
         client = ollama.Client(host=OLLAMA_HOST)
         models_data = client.list()
         
         # 使用列表推导式为每个模型添加前缀并添加到主列表
         ollama_models = [f"ollama:{model['model']}" for model in models_data["models"]]
         all_models.extend(ollama_models)
-        print(f"成功从 Ollama 获取 {len(ollama_models)} 个模型。")
+        logger.info(f"成功从 Ollama 获取 {len(ollama_models)} 个模型。")
 
     except Exception as e:
-        print(f"获取 Ollama 模型失败。请检查 Ollama 服务是否正在运行。错误: {e}")
+        logger.info(f"获取 Ollama 模型失败。请检查 Ollama 服务是否正在运行。错误: {e}")
 
     # --- 2. 尝试获取 LM Studio 模型 ---
     try:
-        print(f"正在尝试连接 LM Studio 服务于 {LM_STUDIO_BASE_URL}...")
+        logger.info(f"正在尝试连接 LM Studio 服务于 {LM_STUDIO_BASE_URL}...")
         # api_key 对于本地服务器不是必需的，但 openai 库要求提供
         client = openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="not-needed")
-        response = client.models.list()
+        response = client.with_options(timeout=1, max_retries=0).models.list()
         
         # 为每个模型ID添加前缀并添加到主列表
         lms_models = [f"lms:{model.id}" for model in response.data]
         all_models.extend(lms_models)
-        print(f"成功从 LM Studio 获取 {len(lms_models)} 个模型。")
+        logger.info(f"成功从 LM Studio 获取 {len(lms_models)} 个模型。")
 
     except Exception as e:
-        print(f"获取 LM Studio 模型失败。请检查 LM Studio 服务器是否已启动并在运行。错误: {e}")
+        logger.error(f"获取 LM Studio 模型失败。请检查 LM Studio 服务器是否已启动并在运行。错误: {e}")
 
     return all_models
 
@@ -1124,11 +1129,11 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
 
 def analyze_videos(frame: np.ndarray, model: str, history: list): # 为frame添加类型提示
     if frame is None:
-        print("错误：输入的帧为 None，无法处理。")
+        logger.error("错误：输入的帧为 None，无法处理。")
         # Return current history and an empty HTML update
         return history, "无新分析结果"
 
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing frame, will work")
+    logger.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing frame, will work")
 
     try:
         # 校正图像方向：
@@ -1153,7 +1158,7 @@ def analyze_videos(frame: np.ndarray, model: str, history: list): # 为frame添�
         # 提取 Ollama 的回复
         ollama_result = response.get("message", {}).get("content", "Ollama 未返回有效结果")
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ollama 分析结果: {ollama_result[:40]}...")
+        logger.info(f"Ollama 分析结果: {ollama_result[:40]}...")
         
         # 更新历史记录
         new_history = [f"[{time.strftime('%H:%M:%S')}] {ollama_result}"] + history
@@ -1171,10 +1176,10 @@ def analyze_videos(frame: np.ndarray, model: str, history: list): # 为frame添�
         
         return new_history, html_output
     except cv2.error as e:
-        print(f"OpenCV 错误：无法处理. 错误信息: {e}")
+        logger.error(f"OpenCV 错误：无法处理. 错误信息: {e}")
         return history, f"OpenCV 错误: {e}"
     except Exception as e:
-        print(f"发生未知错误：无法处理. 错误信息: {e}")
+        logger.error(f"发生未知错误：无法处理. 错误信息: {e}")
         return history, f"未知错误: {e}" 
 
 
