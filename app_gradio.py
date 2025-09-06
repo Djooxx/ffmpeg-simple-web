@@ -105,12 +105,56 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
         if len(text) > 100:
             split_pattern = r'([。;；!！?？]|…|\.{2,})'
             sentences_temp = re.split(split_pattern, text)
-            for sentence in sentences_temp:
-                if sentence and len(sentence) > 100:
-                    sub_sentences = re.split(r'[，,]', sentence)
-                    sentences.extend(sub_sentences)
+            MAX_LEN = 100 # 设定我们的目标长度阈值
+            for segment in sentences_temp:
+                if not segment: # re.split 可能会产生空字符串
+                    continue
+                # 核心修改点在这里：
+                # 检查这个 segment (它要么是句子内容，要么是分隔符如 '。')
+                if len(segment) > MAX_LEN:
+                    # 这个 segment 是文本，并且它太长了，需要按逗号处理
+                    
+                    # 1. 使用捕获组 ( ) 来分割，这样逗号也会被保留在列表中
+                    # "a,b，c" -> ['a', ',', 'b', '，', 'c']
+                    sub_parts = re.split(r'([，,])', segment)
+                    
+                    current_chunk = "" # 初始化当前块
+                    
+                    # 2. 迭代这些部分。我们总是尝试组合 (文本 + 紧随其后的分隔符)
+                    for i in range(0, len(sub_parts), 2): # 步长为 2，跳过分隔符（我们手动处理它）
+                        
+                        text_part = sub_parts[i]
+                        delimiter = sub_parts[i+1] if i + 1 < len(sub_parts) else "" # 获取逗号（如果存在）
+                        
+                        segment_with_delim = text_part + delimiter # (例如 "这是第一部分" + ",")
+
+                        # 3. 贪心组合逻辑
+                        # 检查如果把这个新部分加进来，是否会超过最大长度
+                        if len(current_chunk) + len(segment_with_delim) > MAX_LEN:
+                            # 超过了！
+                            # A. 我们必须先提交(append)之前积累的 current_chunk (前提是它不为空)
+                            if current_chunk:
+                                sentences.append(current_chunk)
+                            
+                            # B. 这个 segment_with_delim 成为新块的开始
+                            #    (注意：如果这个 segment_with_delim 本身就>MAX_LEN，我们也别无选择，
+                            #     因为它内部没有逗号了。我们也必须接受它作为一整个块。)
+                            current_chunk = segment_with_delim
+                        else:
+                            # 没超过，很好，继续累积
+                            current_chunk += segment_with_delim
+                    
+                    # 4. 循环结束后，不要忘记添加最后一个累积的块
+                    if current_chunk:
+                        sentences.append(current_chunk)
+                        
                 else:
-                    sentences.append(sentence)
+                    # 这部分要么是短句子 (<= 100)，要么是分隔符 (如 '。', '！')
+                    # 按照原始逻辑添加即可
+                    sentences.append(segment)
+            
+            # (过滤掉任何可能产生的仅包含空白的字符串)
+            sentences = [s for s in sentences if s and s.strip()]
         else:
             sentences = [text]
         punctuation_pattern = r'^[\s。;|；!！?>？….,，、\-()（）“”"‘’\'*`\u2018\u2019\u201c\u201d\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]+$'
