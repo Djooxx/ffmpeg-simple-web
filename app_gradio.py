@@ -239,6 +239,19 @@ def convert_size(size_bytes):
 
 # 视频信息获取
 def get_video_info(video_path: str) -> str:
+    """
+    获取指定视频文件的基本信息，包括时长、大小、分辨率、编码格式、比特率和帧率。
+
+    Args:
+        video_path (str): 视频文件的路径，支持本地文件路径。
+
+    Returns:
+        str: 格式化的视频信息字符串，包含时长、文件大小、分辨率、编码格式、比特率和帧率。
+             如果文件不存在、不是文件或无法解析，则返回错误信息。
+
+    Raises:
+        Exception: 如果 ffmpeg.probe 无法处理视频文件，可能抛出异常并返回错误信息。
+    """
     video_path = process_path(video_path)
     if not os.path.exists(video_path):
         return f"文件路径不存在"
@@ -1526,4 +1539,4 @@ with gr.Blocks() as demo:
             time_limit=0.8    # 后端最长处理时间
         )
 # 启动Gradio应用
-demo.launch(server_port=7860, inbrowser=True)
+demo.launch(server_port=7860, inbrowser=True, mcp_server=True)
