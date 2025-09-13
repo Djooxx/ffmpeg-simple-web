@@ -437,6 +437,11 @@ def convert_video(video_path: str, output_format: str) -> str:
     if not os.path.isfile(video_path):
         return f"路径不是文件"
     output_format = output_format.strip().lstrip('.')
+    if not output_format:
+        return "目标格式不能为空"
+    common_formats = ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm']
+    if output_format.lower() not in common_formats:
+        return f"不支持的目标视频格式: {output_format}"
     timestamp = int(time.time())
     output_path = video_path.rsplit('.', 1)[0] + f'_{timestamp}.{output_format}'
     bitrate = get_target_video_bitrate(video_path)
