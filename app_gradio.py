@@ -50,6 +50,7 @@ import cv2
 import base64
 import openai
 
+
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 # 全局Ollama客户端实例
 ollama_client = ollama.Client(host='http://127.0.0.1:11434')
@@ -1528,7 +1529,7 @@ with gr.Blocks() as demo:
         analysis_history = gr.State([])
         with gr.Row():
             with gr.Column(scale=1):
-                input_img = gr.Image(sources=["webcam"], type="numpy", label="Webcam Input",  mirror_webcam=False)
+                input_img = gr.Image(sources=["webcam"], type="numpy", label="Webcam Input",  webcam_options=gr.WebcamOptions(mirror=False))
             with gr.Column(scale=1):
                 status_message = gr.HTML(
                     label="分析结果"
@@ -1544,4 +1545,4 @@ with gr.Blocks() as demo:
             time_limit=0.8    # 后端最长处理时间
         )
 # 启动Gradio应用
-demo.launch(server_port=7860, inbrowser=True, mcp_server=True)
+demo.launch(server_name='0.0.0.0', server_port=7860, inbrowser=True, mcp_server=True)
