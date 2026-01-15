@@ -44,7 +44,6 @@ import traceback
 from yt_dlp import YoutubeDL
 import tempfile
 from urllib.parse import urlparse, urlunparse
-# 假设Kokoro相关库已安装
 from kokoro import KModel, KPipeline  # 需确认实际导入方式
 import cv2
 import base64
@@ -158,7 +157,7 @@ def generate_audio_data(text: str, voice: str) -> List[np.ndarray]:
             sentences = [s for s in sentences if s and s.strip()]
         else:
             sentences = [text]
-        punctuation_pattern = r'^[\s。;|；!！?>？….,，、\-()（）“”"‘’\'*`\u2018\u2019\u201c\u201d\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]+$'
+        punctuation_pattern = r'^[\s。;|；!！【】?>？….,，、\-()（）“”"‘’\'*`\u2018\u2019\u201c\u201d\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]+$'
         texts = [(sentence.strip(),) for sentence in sentences if sentence.strip() and not re.match(punctuation_pattern, sentence.strip())]
         if not texts:
             logger.info("没有有效文本内容，跳过音频生成")
@@ -533,21 +532,21 @@ def clean_bilibili_url(video_url):
     return cleaned_url
 
 # 总结视频内容
-def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tuple[str, Union[Tuple[int, np.ndarray], None], gr.update]: # Modified return type
+def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tuple[str, Union[Tuple[int, np.ndarray], None], gr.update]:
     try:
         if not video_url.strip():
-            return "", None, gr.update(value="错误: 请输入视频URL", visible=True) # Modified line
+            return "", None, gr.update(value="错误: 请输入视频URL", visible=True)
         if not ollama_model:
-            return "", None, gr.update(value="错误: 请选择Ollama模型", visible=True) # Modified line
+            return "", None, gr.update(value="错误: 请选择Ollama模型", visible=True)
         if not tts_voice:
-            return "", None, gr.update(value="错误: 请选择TTS语音", visible=True) # Modified line
+            return "", None, gr.update(value="错误: 请选择TTS语音", visible=True)
 
         logger.info(f"开始总结视频URL: {video_url} 使用模型: {ollama_model} 和语音: {tts_voice}")
 
         video_url = clean_bilibili_url(video_url)
         logger.info(f"清理后的视频URL: {video_url}")
 
-        video_title = "未知标题" # 初始化标题
+        video_title = "未知标题"
         # 1. 下载音频
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts = {
@@ -557,83 +556,69 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                 'noplaylist': True,
                 'quiet': False,
                 'no_warnings': False,
-                # 'proxy': 'http://127.0.0.1:7890',  # 添加代理设置
             }
             downloaded_audio_path = None
             with YoutubeDL(ydl_opts) as ydl:
                 try:
                     logger.info(f"开始使用 yt-dlp 下载: {video_url}")
-                    info_dict = ydl.extract_info(video_url, download=True) # download=True 会执行下载
-                    video_title = info_dict.get('title', '未知标题') # <-- 获取标题
+                    info_dict = ydl.extract_info(video_url, download=True)
+                    video_title = info_dict.get('title', '未知标题')
                     logger.info(f"提取到的视频标题: {video_title}")
 
-                    # ydl.prepare_filename(info_dict) 返回的是基于模板的文件名，但不一定是实际下载的文件名
-                    # 更好的方式是检查 tmpdir 中的文件
                     downloaded_files = os.listdir(tmpdir)
                     if not downloaded_files:
                         logger.error("yt_dlp 未能下载任何文件")
                         return "", None, gr.update(value="错误: 无法从URL下载音频 (无文件)", visible=True)
                     
-                    # 假设只有一个音频文件被下载 (因为 noplaylist=True)
-                    # 并且文件名可能包含特殊字符，yt-dlp会处理
-                    # 我们只需要tmpdir中的第一个（也应该是唯一一个）文件
                     downloaded_audio_path = os.path.join(tmpdir, downloaded_files[0])
                     logger.info(f"音频已下载到: {downloaded_audio_path}")
                 except Exception as e:
                     logger.error(f"yt_dlp 下载或提取信息错误: {str(e)}")
-                    # 可以尝试从错误信息中获取更具体的yt-dlp错误
                     error_message = str(e)
                     if "Unsupported URL" in error_message:
                          actual_error = "不支持的URL或视频无法访问"
                     elif "Video unavailable" in error_message:
                          actual_error = "视频不可用"
                     else:
-                         actual_error = error_message # 保留原始错误的部分信息
+                         actual_error = error_message
                     return "", None, gr.update(value=f"错误 (yt-dlp): {actual_error}", visible=True)
 
             if not downloaded_audio_path or not os.path.exists(downloaded_audio_path):
                 logger.error("下载的音频文件路径无效或文件不存在")
-                return "", None, gr.update(value="错误: 下载的音频文件处理失败", visible=True) # Modified line
+                return "", None, gr.update(value="错误: 下载的音频文件处理失败", visible=True)
 
             # 2. 音频转文字 (SenseVoiceSmall)
             logger.info(f"开始使用SenseVoice进行语音转文字: {downloaded_audio_path}")
             sense_voice_result_str = sense_voice(downloaded_audio_path)
             logger.info(f"SenseVoice 结果: {sense_voice_result_str}")
 
-            # 从结果字符串中提取文本
             transcribed_text = ""
             if "错误:" in sense_voice_result_str:
                 logger.error(f"SenseVoice转换失败: {sense_voice_result_str}")
-                # Extract the core error message from sense_voice_result_str if it's formatted like "错误: actual error"
                 actual_error_message = sense_voice_result_str.split("错误:", 1)[-1].strip() if "错误:" in sense_voice_result_str else sense_voice_result_str
-                return "", None, gr.update(value=f"错误 (SenseVoice): {actual_error_message}", visible=True) # Modified line
+                return "", None, gr.update(value=f"错误 (SenseVoice): {actual_error_message}", visible=True)
 
-            # 改进文本提取逻辑
             match = re.search(r"文本内容：(.*?)(\n文件保存路径：|$)", sense_voice_result_str, re.DOTALL)
             if match:
                 transcribed_text = match.group(1).strip()
             else:
-                # 兼容旧版或仅文本输出的情况
                 if sense_voice_result_str.startswith("转换成功！"):
-                     # 尝试去除 "转换成功！\n文本内容：" 和 "\n文件保存路径：..."
                     text_content_part = sense_voice_result_str.replace("转换成功！", "").replace("文本内容：", "").strip()
                     path_part_index = text_content_part.find("文件保存路径：")
                     if path_part_index != -1:
                         transcribed_text = text_content_part[:path_part_index].strip()
                     else:
-                        transcribed_text = text_content_part # 如果没有路径信息，则认为剩余部分都是文本
-                else: # 如果格式不匹配，且不包含错误，则认为整个结果是文本
+                        transcribed_text = text_content_part
+                else:
                     transcribed_text = sense_voice_result_str.strip()
 
             if not transcribed_text:
                 logger.warning("SenseVoice 未能提取有效文本")
-                return "", None, gr.update(value="错误: 语音转文字未能提取有效文本", visible=True) # Modified line
+                return "", None, gr.update(value="错误: 语音转文字未能提取有效文本", visible=True)
             logger.info(f"提取的文本: {transcribed_text[:200]}...")
 
-            # 3. 调用大语言模型进行总结 (chat_with_ollama)
+            # 3. 调用大语言模型进行总结
             logger.info(f"开始使用Ollama模型 '{ollama_model}' 进行总结")
-            # 准备一个初始的空历史记录
-            initial_history = []
             optimized_prompt = (
                 f"视频标题：【{video_title}】\n\n"
                 f"这是一段来自上述标题视频的语音转录文本（由SenseVoiceSmall识别，源自Bilibili或YouTube）。"
@@ -646,6 +631,7 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                 f"目标是让未观看视频的人也能快速把握视频的精髓。\n\n"
                 f"视频文本如下：\n{transcribed_text}"
             )
+            initial_history = [] # 这是一个空列表
             summary_history, audio_tuple, ollama_error = chat_with_ollama(
                 message=optimized_prompt,
                 model=ollama_model,
@@ -655,27 +641,32 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
 
             if ollama_error:
                 logger.error(f"Ollama聊天错误: {ollama_error}")
-                return "", None, gr.update(value=f"错误 (Ollama): {ollama_error}", visible=True) # Modified line
+                return "", None, gr.update(value=f"错误 (Ollama): {ollama_error}", visible=True)
             
             sample_rate, audio_data = audio_tuple if audio_tuple is not None else (None, None)
 
             summarized_text = ""
-            if summary_history and len(summary_history) > 0 and len(summary_history[-1]) == 2:
-                summarized_text = summary_history[-1][1] # 获取Ollama的回复
+            if summary_history and len(summary_history) > 0:
+                last_message = summary_history[-1]
+                # 兼容字典格式 (新) 和 元组格式 (旧)
+                if isinstance(last_message, dict):
+                    summarized_text = last_message.get('content', '')
+                elif isinstance(last_message, (tuple, list)) and len(last_message) >= 2:
+                    summarized_text = last_message[1]
 
             if not summarized_text:
                 logger.warning("Ollama未能生成总结文本")
-                return "", None, gr.update(value="错误: 大语言模型未能生成总结文本", visible=True) # Modified line
+                return "", None, gr.update(value="错误: 大语言模型未能生成总结文本", visible=True)
 
             logger.info(f"总结文本: {summarized_text[:200]}...")
-            logger.info(f"生成语音数据，采样率: {sample_rate}, 数据长度: {len(audio_data) if audio_data is not None and isinstance(audio_data, np.ndarray) else 0}")
-
-            # 4. 返回总结文本和语音
-            return summarized_text, (sample_rate, audio_data) if sample_rate is not None and audio_data is not None else None, gr.update(value="", visible=False) # Modified line
+            
+            return summarized_text, (sample_rate, audio_data) if sample_rate is not None and audio_data is not None else None, gr.update(value="", visible=False)
 
     except Exception as e:
-        logger.error(f"视频总结过程中发生意外错误: {str(e)}\n{traceback.format_exc()}")
-        return "", None, gr.update(value=f"严重错误: {str(e)}", visible=True) # Modified line
+        logger.error(f"视频总结过程中发生意外错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return "", None, gr.update(value=f"错误: 视频总结失败 - {str(e)}", visible=True)
 
 # 音频转文字 (SenseVoiceSmall)
 def sense_voice(audio_path: str) -> str:
