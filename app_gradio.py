@@ -35,7 +35,7 @@ import ollama
 from pathlib import Path
 import srt
 from datetime import timedelta
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Dict, Any
 import torch
 import tqdm
 import mysql.connector # 添加 MySQL 连接器
@@ -768,7 +768,19 @@ def get_all_models() -> List[str]:
     return all_models
 
 
-def chat_with_ollama(message: str, model: str, voice: str, history: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, str]], Tuple[int, np.ndarray], str]:
+def get_clean_content(content: Any) -> str:
+    """
+    辅助函数：处理 Gradio 传入的 content，可能是字符串，也可能是列表（多模态格式）
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # 如果是 [{'text': '...', 'type': 'text'}] 格式，提取 text
+        text_parts = [item.get('text', '') for item in content if isinstance(item, dict) and item.get('type') == 'text']
+        return "".join(text_parts)
+    return str(content)
+
+def chat_with_ollama(message: str, model: str, voice: str, history: List[Dict]) -> Tuple[List[Dict], Any, str]:
     try:
         if not model:
             logger.warning("未选择模型，返回错误提示")
@@ -776,35 +788,48 @@ def chat_with_ollama(message: str, model: str, voice: str, history: List[Tuple[s
         if not message.strip():
             logger.warning("输入消息为空，返回错误提示")
             return history, None, "错误: 请输入有效消息"
-        messages = []
-        for user_msg, assistant_msg in history:
-            if user_msg:
-                messages.append({"role": "user", "content": user_msg})
-            if assistant_msg:
-                messages.append({"role": "assistant", "content": assistant_msg})
-        messages.append({"role": "user", "content": message})
-        response = ollama_client.chat(model=model, messages=messages)
+
+        # 1. 构建发送给 Ollama 的消息列表 (进行数据清洗)
+        ollama_messages = []
+        for msg in history:
+            ollama_messages.append({
+                "role": msg["role"],
+                "content": get_clean_content(msg["content"]) # 关键修复：清洗 content
+            })
+        
+        # 添加当前用户消息
+        ollama_messages.append({"role": "user", "content": message})
+
+        # 2. 调用 Ollama
+        response = ollama_client.chat(model=model, messages=ollama_messages)
         assistant_text = response["message"]["content"]
         logger.info(f"原始回复: {assistant_text}")
-        # 改进正则表达式，匹配多行<think>标签
+
+        # 3. 过滤 <think> 标签
         clean_text = re.sub(r'(?i)<think\s*[^>]*>[\s\S]*?</think\s*>', '', assistant_text).strip()
         logger.info(f"过滤后文本: {clean_text}")
-        # 验证过滤
-        # think_matches = re.findall(r'(?i)<think\s*[^>]*>[\s\S]*?</think\s*>', assistant_text)
-        # logger.info(f"匹配的<think>内容: {think_matches}")
 
+        # 4. 生成语音
+        # 注意：如果 clean_text 为空，返回 None 而不是空数组，防止 Gradio Audio 组件报错
+        audio_result = None
+        if clean_text:
+            try:
+                sample_rate, audio_data = text_to_speech(clean_text, voice)
+                audio_result = (sample_rate, audio_data)
+            except Exception as e:
+                logger.error(f"语音生成失败: {e}")
+                audio_result = None
 
-        # 生成语音（使用过滤后的文本）
-        sample_rate, audio_data = text_to_speech(clean_text, voice) if clean_text else (0, np.array([]))
+        # 5. 更新聊天历史 (Gradio 会自动处理这里的字符串，下一次循环时它可能又变成 list，所以上面要清洗)
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": clean_text})
+        
+        return history, audio_result, ""
 
-        # 更新聊天历史（直接修改history）
-        history.append((message, clean_text))
-        logger.info(f"更新聊天历史: {history}")
-
-        return history, (sample_rate, audio_data), ""
     except Exception as e:
         logger.error(f"聊天错误: {str(e)}")
-        return history, (0, np.array([])), f"错误: {str(e)}"
+        # 错误时音频返回 None，不要返回 (0, np.array([]))
+        return history, None, f"错误: {str(e)}"
 
 # 自然语言查数据库
 # MySQL 数据库配置
