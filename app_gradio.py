@@ -418,7 +418,7 @@ def trim_audio(audio_path: str, start_time: float, end_time: float) -> str:
     # 支持常见音频格式
     supported_formats = ['mp3', 'wav', 'flac', 'aac', 'ogg']
     if input_ext not in supported_formats:
-        return jsonify({'success': False, 'error': f'不支持的音频格式: {input_ext}'})
+        return f"不支持的音频格式: {input_ext}"
     output_path = audio_path.rsplit('.', 1)[0] + f'_{start_time}s-{end_time}s_{timestamp}.{input_ext}'
     try:
         stream = ffmpeg.input(audio_path, ss=start_time, t=end_time - start_time)
@@ -703,7 +703,6 @@ def get_ollama_models() -> List[str]:
     try:
         # 使用全局Ollama客户端
         response = ollama_client.with_options(timeout=1, max_retries=0).models.list()
-        logger.info(f"Ollama模型响应: {response}")
         return [model.id for model in response.data]
     except Exception:
         return []
