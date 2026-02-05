@@ -31,7 +31,6 @@ import whisper
 from faster_whisper import WhisperModel
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
-import ollama
 from pathlib import Path
 import srt
 from datetime import timedelta
@@ -51,10 +50,10 @@ import openai
 
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
-# 全局Ollama客户端实例
-ollama_client = ollama.Client(host='http://127.0.0.1:11434')
-
-
+OLLAMA_HOST = 'http://127.0.0.1:11434'
+LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
+ollama_client = openai.OpenAI(base_url=f"{OLLAMA_HOST}/v1", api_key="not-needed")
+lms_client = openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="not-needed")
 # 设备选择
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 logger.info(f"使用设备: {device}")
@@ -703,13 +702,13 @@ def sense_voice(audio_path: str) -> str:
 def get_ollama_models() -> List[str]:
     try:
         # 使用全局Ollama客户端
-        models = ollama_client.list()
-        return [model["model"] for model in models["models"]]
+        response = ollama_client.with_options(timeout=1, max_retries=0).models.list()
+        logger.info(f"Ollama模型响应: {response}")
+        return [model.id for model in response.data]
     except Exception:
         return []
 
-OLLAMA_HOST = 'http://127.0.0.1:11434'
-LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
+
 def get_all_models() -> List[str]:
     """
     获取本地 Ollama 和 LM Studio 上所有可用的模型。
@@ -730,11 +729,8 @@ def get_all_models() -> List[str]:
     # --- 1. 尝试获取 Ollama 模型 ---
     try:
         logger.info(f"正在尝试连接 Ollama 服务于 {OLLAMA_HOST}...")
-        client = ollama.Client(host=OLLAMA_HOST)
-        models_data = client.list()
-        
-        # 使用列表推导式为每个模型添加前缀并添加到主列表
-        ollama_models = [f"ollama:{model['model']}" for model in models_data["models"]]
+        response = get_ollama_models()
+        ollama_models = [f"ollama:{model_id}" for model_id in response]
         all_models.extend(ollama_models)
         logger.info(f"成功从 Ollama 获取 {len(ollama_models)} 个模型。")
 
@@ -744,10 +740,7 @@ def get_all_models() -> List[str]:
     # --- 2. 尝试获取 LM Studio 模型 ---
     try:
         logger.info(f"正在尝试连接 LM Studio 服务于 {LM_STUDIO_BASE_URL}...")
-        # api_key 对于本地服务器不是必需的，但 openai 库要求提供
-        client = openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="not-needed")
-        response = client.with_options(timeout=1, max_retries=0).models.list()
-        
+        response = lms_client.with_options(timeout=1, max_retries=0).models.list()
         # 为每个模型ID添加前缀并添加到主列表
         lms_models = [f"lms:{model.id}" for model in response.data]
         all_models.extend(lms_models)
@@ -792,8 +785,8 @@ def chat_with_ollama(message: str, model: str, voice: str, history: List[Dict]) 
         ollama_messages.append({"role": "user", "content": message})
 
         # 2. 调用 Ollama
-        response = ollama_client.chat(model=model, messages=ollama_messages)
-        assistant_text = response["message"]["content"]
+        response = ollama_client.chat.completions.create(model=model, messages=ollama_messages)
+        assistant_text = response.choices[0].message.content
         logger.info(f"原始回复: {assistant_text}")
 
         # 3. 过滤 <think> 标签
@@ -1095,22 +1088,17 @@ def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
             # 2. 根据前缀选择并调用相应的模型服务
             if model_prefix == 'ollama':
                 logger.info(f"调用 Ollama (模型: {model_name})")
-                client = ollama.Client(host='http://127.0.0.1:11434')
-                response = client.chat(
+                response = ollama_client.chat.completions.create(
                     model=model_name, 
-                    messages=messages, 
-                    options={
-                        "response_format": {"type": "json_object"}
-                    }
+                    messages=messages
                 )
-                response_content_str = response["message"]["content"]
+                response_content_str = response.choices[0].message.content
 
             elif model_prefix == 'lms':
                 logger.info(f"调用 LM Studio (模型: {model_name})")
                 # LM Studio 提供兼容 OpenAI 的接口，通常在 http://localhost:1234/v1
                 # API Key对于本地LM Studio不是必需的，但openai库要求提供
-                client = openai.OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
-                response = client.chat.completions.create(
+                response = lms_client.chat.completions.create(
                     model=model_name, # 在LM Studio中，这通常指向已加载的模型
                     messages=messages
                 )
