@@ -1,33 +1,9 @@
 # ffmpeg-simple-web
 
 ## 使用
-### 方法1
-#### 1.执行以下命令
-```
-git clone git@github.com:Djooxx/ffmpeg-simple-web.git
-cd ffmpeg-simple-web
-.\start.bat
-```
-##### start.bat将自动执行以下命令
-```
-# 创建虚拟环境
-python -m venv venv
-# 激活虚拟环境
-# Windows:
-venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-```
-
-#### 2.访问:
-```
-http://localhost:5000/
-```
-
-### 方法2
 1.执行命令
 ```
-python app_gradio.py
+gradio_web.bat
 ```
 2.访问
 http://127.0.0.1:7860

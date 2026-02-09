@@ -37,8 +37,6 @@ from datetime import timedelta
 from typing import List, Tuple, Union, Dict, Any
 import torch
 import tqdm
-import mysql.connector # 添加 MySQL 连接器
-import mysql.connector.pooling # 添加连接池支持
 import traceback
 from yt_dlp import YoutubeDL
 import tempfile
@@ -57,6 +55,54 @@ lms_client = openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="not-needed")
 # 设备选择
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 logger.info(f"使用设备: {device}")
+# 统一的大模型调用接口
+def chat_with_llm(model_str: str, messages: List[Dict]) -> str:
+    """
+    统一调用本地 LLM (Ollama 或 LM Studio)。
+    model_str: 格式应为 'ollama:model_name' 或 'lms:model_name'
+    messages: OpenAI 格式的消息列表
+    """
+    try:
+        if ":" in model_str:
+            model_prefix, model_name = model_str.split(':', 1)
+        else:
+            # 如果没有前缀，默认回退到 ollama 或者报错
+            # 这里为了兼容性，如果用户手动输入没有前缀，默认尝试 ollama
+            model_prefix = "ollama" 
+            model_name = model_str
+    except ValueError:
+        raise ValueError(f"模型名称格式错误: {model_str}")
+
+    logger.info(f"正在调用 {model_prefix} 服务，使用模型: {model_name}")
+
+    try:
+        response_content = ""
+        
+        if model_prefix == 'ollama':
+            # 调用 Ollama
+            response = ollama_client.chat.completions.create(
+                model=model_name,
+                messages=messages
+            )
+            response_content = response.choices[0].message.content
+
+        elif model_prefix == 'lms':
+            # 调用 LM Studio
+            response = lms_client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.7 
+            )
+            response_content = response.choices[0].message.content
+        
+        else:
+            raise ValueError(f"不支持的模型前缀: {model_prefix}")
+
+        return response_content
+
+    except Exception as e:
+        logger.error(f"调用 LLM 失败 ({model_prefix}): {e}")
+        raise e
 
 
 is_init_kokoro = False
@@ -531,16 +577,16 @@ def clean_bilibili_url(video_url):
     return cleaned_url
 
 # 总结视频内容
-def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tuple[str, Union[Tuple[int, np.ndarray], None], gr.update]:
+def summarize_video_url(video_url: str, llm_model: str, tts_voice: str) -> Tuple[str, Union[Tuple[int, np.ndarray], None], gr.update]:
     try:
         if not video_url.strip():
             return "", None, gr.update(value="错误: 请输入视频URL", visible=True)
-        if not ollama_model:
-            return "", None, gr.update(value="错误: 请选择Ollama模型", visible=True)
+        if not llm_model:
+            return "", None, gr.update(value="错误: 请选择llm模型", visible=True)
         if not tts_voice:
             return "", None, gr.update(value="错误: 请选择TTS语音", visible=True)
 
-        logger.info(f"开始总结视频URL: {video_url} 使用模型: {ollama_model} 和语音: {tts_voice}")
+        logger.info(f"开始总结视频URL: {video_url} 使用模型: {llm_model} 和语音: {tts_voice}")
 
         video_url = clean_bilibili_url(video_url)
         logger.info(f"清理后的视频URL: {video_url}")
@@ -617,8 +663,8 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
             logger.info(f"提取的文本: {transcribed_text[:200]}...")
 
             # 3. 调用大语言模型进行总结
-            logger.info(f"开始使用Ollama模型 '{ollama_model}' 进行总结")
-            optimized_prompt = (
+            logger.info(f"开始使用LLM模型 '{llm_model}' 进行总结")
+            prompt_content = (
                 f"视频标题：【{video_title}】\n\n"
                 f"这是一段来自上述标题视频的语音转录文本（由SenseVoiceSmall识别，源自Bilibili或YouTube）。"
                 f"请你用中文为其撰写一份清晰、简洁、易于理解的内容摘要。\n"
@@ -630,36 +676,23 @@ def summarize_video_url(video_url: str, ollama_model: str, tts_voice: str) -> Tu
                 f"目标是让未观看视频的人也能快速把握视频的精髓。\n\n"
                 f"视频文本如下：\n{transcribed_text}"
             )
-            initial_history = [] # 这是一个空列表
-            summary_history, audio_tuple, ollama_error = chat_with_ollama(
-                message=optimized_prompt,
-                model=ollama_model,
-                voice=tts_voice,
-                history=initial_history
-            )
-
-            if ollama_error:
-                logger.error(f"Ollama聊天错误: {ollama_error}")
-                return "", None, gr.update(value=f"错误 (Ollama): {ollama_error}", visible=True)
-            
-            sample_rate, audio_data = audio_tuple if audio_tuple is not None else (None, None)
-
-            summarized_text = ""
-            if summary_history and len(summary_history) > 0:
-                last_message = summary_history[-1]
-                # 兼容字典格式 (新) 和 元组格式 (旧)
-                if isinstance(last_message, dict):
-                    summarized_text = last_message.get('content', '')
-                elif isinstance(last_message, (tuple, list)) and len(last_message) >= 2:
-                    summarized_text = last_message[1]
-
-            if not summarized_text:
-                logger.warning("Ollama未能生成总结文本")
-                return "", None, gr.update(value="错误: 大语言模型未能生成总结文本", visible=True)
+            messages = [{"role": "user", "content": prompt_content}]
+            try:
+                # === 核心修改点 ===
+                summarized_text = chat_with_llm(llm_model, messages)
+                
+                # 过滤 <think> 标签 (DeepSeek 等模型)
+                summarized_text = re.sub(r'(?i)<think\s*[^>]*>[\s\S]*?</think\s*>', '', summarized_text).strip()
+                
+            except Exception as llm_error:
+                return "", None, gr.update(value=f"错误 (LLM): {str(llm_error)}", visible=True)
 
             logger.info(f"总结文本: {summarized_text[:200]}...")
-            
-            return summarized_text, (sample_rate, audio_data) if sample_rate is not None and audio_data is not None else None, gr.update(value="", visible=False)
+            # 生成语音
+            audio_tuple = None
+            if summarized_text:
+                audio_tuple = text_to_speech(summarized_text, tts_voice)
+            return summarized_text, audio_tuple, gr.update(value="", visible=False)
 
     except Exception as e:
         logger.error(f"视频总结过程中发生意外错误: {str(e)}")
@@ -698,58 +731,42 @@ def sense_voice(audio_path: str) -> str:
     except Exception as e:
         return f"错误: {str(e)}"
 
-# 获取Ollama模型
-def get_ollama_models() -> List[str]:
-    try:
-        # 使用全局Ollama客户端
-        response = ollama_client.with_options(timeout=1, max_retries=0).models.list()
-        return [model.id for model in response.data]
-    except Exception:
-        return []
-
-
 def get_all_models() -> List[str]:
     """
-    获取本地 Ollama 和 LM Studio 上所有可用的模型。
-
-    此函数会分别尝试连接两个服务：
-    - 从 Ollama 获取的模型会以 'ollama:' 作为前缀。
-    - 从 LM Studio 获取的模型会以 'lms:' 作为前缀。
-    
-    如果某个服务无法连接，函数会打印一条错误信息但不会中断，
-    并继续尝试获取另一个服务中的模型。
-
-    Returns:
-        List[str]: 一个包含所有可用模型名称（带前缀）的列表。
-                   如果两个服务都无法访问，则返回一个空列表。
+    获取本地 Ollama 和 LM Studio 上所有可用的模型，并添加前缀。
     """
     all_models = []
 
-    # --- 1. 尝试获取 Ollama 模型 ---
+    # 1. Ollama
     try:
-        logger.info(f"正在尝试连接 Ollama 服务于 {OLLAMA_HOST}...")
-        response = get_ollama_models()
-        ollama_models = [f"ollama:{model_id}" for model_id in response]
+        logger.info(f"正在尝试连接 Ollama 服务...")
+        response = ollama_client.models.list()
+        # 注意：OpenAI SDK 返回的结构可能因版本不同略有差异，通常是 response.data
+        if hasattr(response, 'data'):
+            models = response.data
+        else:
+            models = response # 兼容某些版本
+            
+        ollama_models = [f"ollama:{model.id}" for model in models]
         all_models.extend(ollama_models)
-        logger.info(f"成功从 Ollama 获取 {len(ollama_models)} 个模型。")
-
     except Exception as e:
-        logger.info(f"获取 Ollama 模型失败。请检查 Ollama 服务是否正在运行。错误: {e}")
+        logger.warning(f"获取 Ollama 模型失败: {e}")
 
-    # --- 2. 尝试获取 LM Studio 模型 ---
+    # 2. LM Studio
     try:
-        logger.info(f"正在尝试连接 LM Studio 服务于 {LM_STUDIO_BASE_URL}...")
-        response = lms_client.with_options(timeout=1, max_retries=0).models.list()
-        # 为每个模型ID添加前缀并添加到主列表
-        lms_models = [f"lms:{model.id}" for model in response.data]
-        all_models.extend(lms_models)
-        logger.info(f"成功从 LM Studio 获取 {len(lms_models)} 个模型。")
+        logger.info(f"正在尝试连接 LM Studio 服务...")
+        response = lms_client.models.list()
+        if hasattr(response, 'data'):
+            models = response.data
+        else:
+            models = response
 
+        lms_models = [f"lms:{model.id}" for model in models]
+        all_models.extend(lms_models)
     except Exception as e:
-        logger.error(f"获取 LM Studio 模型失败。请检查 LM Studio 服务器是否已启动并在运行。错误: {e}")
+        logger.warning(f"获取 LM Studio 模型失败 (服务可能未启动): {e}")
 
     return all_models
-
 
 def get_clean_content(content: Any) -> str:
     """
@@ -763,47 +780,41 @@ def get_clean_content(content: Any) -> str:
         return "".join(text_parts)
     return str(content)
 
-def chat_with_ollama(message: str, model: str, voice: str, history: List[Dict]) -> Tuple[List[Dict], Any, str]:
+def chat_with_llm_return_voice(message: str, model: str, voice: str, history: List[Dict]) -> Tuple[List[Dict], Any, str]:
     try:
         if not model:
-            logger.warning("未选择模型，返回错误提示")
             return history, None, "错误: 请先选择一个模型"
-        if not message.strip():
-            logger.warning("输入消息为空，返回错误提示")
-            return history, None, "错误: 请输入有效消息"
-
-        # 1. 构建发送给 Ollama 的消息列表 (进行数据清洗)
-        ollama_messages = []
-        for msg in history:
-            ollama_messages.append({
-                "role": msg["role"],
-                "content": get_clean_content(msg["content"]) # 关键修复：清洗 content
-            })
         
-        # 添加当前用户消息
-        ollama_messages.append({"role": "user", "content": message})
+        # 1. 构建消息列表 (清洗数据)
+        llm_messages = []
+        for msg in history:
+            content = get_clean_content(msg["content"])
+            if content: # 确保不发送空内容
+                llm_messages.append({
+                    "role": msg["role"],
+                    "content": content
+                })
+        
+        llm_messages.append({"role": "user", "content": message})
 
-        # 2. 调用 Ollama
-        response = ollama_client.chat.completions.create(model=model, messages=ollama_messages)
-        assistant_text = response.choices[0].message.content
+        # 2. 调用统一接口
+        assistant_text = chat_with_llm(model, llm_messages)
         logger.info(f"原始回复: {assistant_text}")
 
         # 3. 过滤 <think> 标签
         clean_text = re.sub(r'(?i)<think\s*[^>]*>[\s\S]*?</think\s*>', '', assistant_text).strip()
-        logger.info(f"过滤后文本: {clean_text}")
-
         # 4. 生成语音
-        # 注意：如果 clean_text 为空，返回 None 而不是空数组，防止 Gradio Audio 组件报错
         audio_result = None
         if clean_text:
             try:
-                sample_rate, audio_data = text_to_speech(clean_text, voice)
-                audio_result = (sample_rate, audio_data)
+                # 只有当文本不为空时才生成语音
+                audio_tuple = text_to_speech(clean_text, voice)
+                if audio_tuple:
+                    audio_result = audio_tuple
             except Exception as e:
                 logger.error(f"语音生成失败: {e}")
-                audio_result = None
 
-        # 5. 更新聊天历史 (Gradio 会自动处理这里的字符串，下一次循环时它可能又变成 list，所以上面要清洗)
+        # 5. 更新历史
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": clean_text})
         
@@ -811,450 +822,73 @@ def chat_with_ollama(message: str, model: str, voice: str, history: List[Dict]) 
 
     except Exception as e:
         logger.error(f"聊天错误: {str(e)}")
-        # 错误时音频返回 None，不要返回 (0, np.array([]))
         return history, None, f"错误: {str(e)}"
-
-# 自然语言查数据库
-# MySQL 数据库配置
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 9981,
-    'user': 'root',
-    'password': '1234qwer',
-    'database': 'money',  # 请根据实际数据库修改
-    'raise_on_warnings': True
-}
-
-# 创建数据库连接池
-db_pool = None
-
-def get_db_connection():
-    global db_pool
-    if db_pool is None:
-        try:
-            db_pool = mysql.connector.pooling.MySQLConnectionPool(
-                pool_name="mypool",
-                pool_size=5,
-                pool_reset_session=True,
-                **DB_CONFIG
-            )
-            logger.info("数据库连接池创建成功")
-        except mysql.connector.Error as err:
-            logger.error(f"创建数据库连接池失败: {err}")
-            raise
-    try:
-        conn = db_pool.get_connection()
-        if conn.is_connected():
-            logger.debug("从连接池获取连接成功")
-            return conn
-        else:
-            logger.error("从连接池获取的连接无效 (is_connected() is False)")
-            return None
-    except mysql.connector.Error as err:
-        logger.error(f"从连接池获取连接失败: {err}")
-        return None
-
-# 数据库操作函数
-def execute_sql(sql_query):
-    """执行 SQL 查询并返回结果"""
-    conn = None
-    cursor = None
-    logger.info(f"开始执行 SQL: {sql_query}")
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            error_msg = "无法获取数据库连接"
-            logger.error(error_msg)
-            return False, error_msg
-        cursor = conn.cursor(dictionary=True, buffered=True)
-        cursor.execute(sql_query)
-        if sql_query.strip().upper().startswith(("SELECT", "SHOW", "DESC")):
-            result = cursor.fetchall()
-            try:
-                result_json = json.dumps(result, ensure_ascii=False, default=str)
-            except TypeError as e:
-                logger.warning(f"JSON 序列化错误: {e}, 将返回原始结果列表")
-                result_json = str(result)
-            logger.info(f"执行sql结果 (JSON): {result_json}")
-            return True, result_json
-        else:
-            conn.commit()
-            result_message = f"操作成功，影响行数: {cursor.rowcount}"
-            logger.info(result_message)
-            return True, result_message
-    except mysql.connector.Error as err:
-        error_msg = f"SQL 执行错误: {err}"
-        logger.error(error_msg)
-        return False, error_msg
-    except Exception as e:
-        error_msg = f"执行 SQL 时发生意外错误: {e}"
-        logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        return False, error_msg
-    finally:
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close()
-
-def get_tables():
-    """获取数据库中的所有表名"""
-    logger.info("开始执行获取数据库中的所有表名 get_tables()")
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            error_msg = "无法获取数据库连接"
-            logger.error(error_msg)
-            return False, error_msg
-        cursor = conn.cursor()
-        cursor.execute("SELECT DATABASE()")
-        current_db = cursor.fetchone()
-        if not current_db or not current_db[0]:
-            error_msg = "未选择数据库。请在 DB_CONFIG 中指定 'database'"
-            logger.error(error_msg)
-            return False, error_msg
-        db_name = current_db[0]
-        logger.info(f"当前数据库: {db_name}")
-        cursor.execute("SHOW TABLES")
-        tables = [table[0] for table in cursor.fetchall()]
-        logger.info(f"表名查询结果: {tables}")
-        return True, tables
-    except mysql.connector.Error as err:
-        error_msg = f"获取表列表错误: {err}"
-        logger.error(error_msg)
-        return False, error_msg
-    except Exception as e:
-        error_msg = f"获取表列表时发生意外错误: {e}"
-        logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        return False, error_msg
-    finally:
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close()
-        logger.info("表名查询结束 get_tables()")
-
-def get_columns(table_name):
-    """获取指定表的列信息"""
-    logger.info(f"开始获取表'{table_name}'的列信息 get_columns(table_name='{table_name}')")
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            error_msg = "无法获取数据库连接"
-            logger.error(error_msg)
-            return False, error_msg
-        cursor = conn.cursor()
-        cursor.execute(f"DESCRIBE `{table_name}`")
-        columns = [column[0] for column in cursor.fetchall()]
-        if not columns:
-            error_msg = f"表 '{table_name}' 不存在或没有列"
-            logger.warning(error_msg)
-            return False, error_msg
-        logger.info(f"查询到列信息 '{table_name}': {columns}")
-        return True, columns
-    except mysql.connector.Error as err:
-        error_msg = f"获取列信息错误: {err}"
-        logger.error(error_msg)
-        if err.errno == mysql.connector.errorcode.ER_NO_SUCH_TABLE:
-            return False, f"表 '{table_name}' 不存在"
-        return False, error_msg
-    except Exception as e:
-        error_msg = f"获取列信息时发生意外错误: {e}"
-        logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        return False, error_msg
-    finally:
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close()
-        logger.info(f"列信息查询结束 get_columns(table_name='{table_name}')")
-
-def get_create_table_statement(table_name):
-    """获取指定表的 CREATE TABLE 语句"""
-    logger.info(f"开始查询表'{table_name}'的 CREATE TABLE 语句 get_create_table_statement(table_name='{table_name}')")
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            error_msg = "无法获取数据库连接"
-            logger.error(error_msg)
-            return False, error_msg
-        cursor = conn.cursor()
-        cursor.execute(f"SHOW CREATE TABLE `{table_name}`")
-        result = cursor.fetchone()
-        if result:
-            create_statement = result[1]
-            logger.info(f"查询建表语句成功 '{table_name}'")
-            return True, create_statement
-        else:
-            error_msg = f"无法获取表 '{table_name}' 的 CREATE TABLE 语句"
-            logger.warning(error_msg)
-            return False, error_msg
-    except mysql.connector.Error as err:
-        error_msg = f"获取 CREATE TABLE 语句错误: {err}"
-        logger.error(error_msg)
-        if err.errno == mysql.connector.errorcode.ER_NO_SUCH_TABLE:
-            return False, f"表 '{table_name}' 不存在"
-        return False, error_msg
-    except Exception as e:
-        error_msg = f"获取 CREATE TABLE 语句时发生意外错误: {e}"
-        logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        return False, error_msg
-    finally:
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close()
-        logger.info(f"查询建表结束 get_create_table_statement(table_name='{table_name}')")
-
-# SQL 生成的系统提示 (GPT-5版)
-SQL_SYSTEM_PROMPT = """
-你是MySQL查询AI代理。任务：严格按JSON格式响应用户请求。
-
-## 核心指令
-1. 输出必须是纯JSON，禁止任何其他文本
-2. 未知Schema时禁止生成SQL查询
-3. 单次只输出一个JSON指令
-4. 基于完整交互历史决策
-5. 返回完整结果，禁止省略
-
-## 执行流程
-按优先级严格执行：
-
-1. **Schema探索**（最高优先级）
-   - 表未知：`{"action": "show_tables"}`
-   - 列未知：`{"action": "show_columns", "table_name": "表名"}`
-   - 需详细定义：`{"action": "show_create_table", "table_name": "表名"}`
-
-2. **数据查询**
-   - `{"sql": "SELECT查询语句"}`
-
-3. **输出答案**
-   - `{"answer": "markdown格式的最终答案"}`
-
-## 严格JSON格式
-输出必须是以下5种之一：
-- `{"action": "show_tables"}`
-- `{"action": "show_columns", "table_name": "..."}`
-- `{"action": "show_create_table", "table_name": "..."}`
-- `{"sql": "..."}`
-- `{"answer": "..."}`
-
-输入格式：
-- 首次：`{"question": "问题"}`
-- 后续：`{"action": "...", "result": [...]}`或`{"sql": "...", "result": "..."}`
-"""
-# 自然语言查数据库
-def nl_to_sql(query: str, model: str) -> Tuple[bool, str]:
-    """
-    将自然语言查询转换为 SQL，支持 Ollama 和 LM Studio。
-
-    Args:
-        query (str): 用户的自然语言查询。
-        model (str): 模型标识符，格式为 'prefix:model_name'。
-                     - 'ollama:model_name' (例如 'ollama:qwen:4b')
-                     - 'lms:model_name' (例如 'lms:local-model/gemma-2-9b-it-q8_0')
-                     LM Studio 中的模型名称通常可以在其本地服务器UI上找到。
-
-    Returns:
-        Tuple[bool, str]: 一个元组，第一个元素表示是否成功，第二个元素是最终答案或错误信息。
-    """
-    logger.info(f"接收到用户查询: {query}")
-    logger.info(f"使用模型字符串: {model}")
-
-    # 1. 解析模型字符串以确定服务类型和模型名称
-    try:
-        model_prefix, model_name = model.split(':', 1)
-    except ValueError:
-        return False, f"错误: 模型字符串 '{model}' 格式不正确。请使用 'ollama:model_name' 或 'lms:model_name' 的格式。"
-
-    max_retries = 50
-    retries = 0
-    messages = [
-        {"role": "system", "content": SQL_SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps({"question": query})}
-    ]
-
-    while retries < max_retries:
-        retries += 1
-        try:
-            response_content_str = None
-
-            # 2. 根据前缀选择并调用相应的模型服务
-            if model_prefix == 'ollama':
-                logger.info(f"调用 Ollama (模型: {model_name})")
-                response = ollama_client.chat.completions.create(
-                    model=model_name, 
-                    messages=messages
-                )
-                response_content_str = response.choices[0].message.content
-
-            elif model_prefix == 'lms':
-                logger.info(f"调用 LM Studio (模型: {model_name})")
-                # LM Studio 提供兼容 OpenAI 的接口，通常在 http://localhost:1234/v1
-                # API Key对于本地LM Studio不是必需的，但openai库要求提供
-                response = lms_client.chat.completions.create(
-                    model=model_name, # 在LM Studio中，这通常指向已加载的模型
-                    messages=messages
-                )
-                response_content_str = response.choices[0].message.content
-            
-            else:
-                return False, f"错误: 不支持的模型前缀 '{model_prefix}'。请使用 'ollama' 或 'lms'。"
-
-            # --- 从这里开始，后续处理逻辑保持不变 ---
-            
-            logger.info(f"模型原始回复 ({retries}): {response_content_str}")
-            if not response_content_str:
-                logger.warning("模型原始回复字符串为空")
-                continue
-
-            # 清理响应 (这段逻辑对两种模型的返回都适用)
-            cleaned_response_str = re.sub(r'<think>.*?</think>', '', response_content_str, flags=re.DOTALL).strip()
-            cleaned_response_str = re.sub(r'^```(?:json)?\s*', '', cleaned_response_str)
-            cleaned_response_str = re.sub(r'\s*```$', '', cleaned_response_str).strip()
-            logger.info(f"模型格式化回复 ({retries}): {cleaned_response_str}")
-
-            try:
-                model_response_json = json.loads(cleaned_response_str)
-            except json.JSONDecodeError:
-                logger.error(f"无效的 JSON 响应: {cleaned_response_str[:200]}...")
-                error_message_to_model = {
-                    "error": "错误的json输出格式,输出的响应必须符合输出格式且为合法的JSON",
-                    "details": f"Your previous response was: '{cleaned_response_str[:200]}...' which is not valid JSON. Please ensure your entire response is a single, valid JSON object matching the required schema."
-                }
-                messages.append({"role": "assistant", "content": cleaned_response_str}) 
-                messages.append({"role": "user", "content": json.dumps(error_message_to_model, ensure_ascii=False)})
-                if retries >= max_retries:
-                    return False, f"错误: 达到最大重试次数，仍无法解析JSON响应。最后一次错误响应: {cleaned_response_str}"
-                continue
-
-            messages.append({"role": "assistant", "content": cleaned_response_str})
-
-            if 'action' in model_response_json:
-                action = model_response_json['action']
-                db_result_payload = {"action": action}
-                success = False
-                result_data = None
-
-                if action == 'show_tables':
-                    success, result_data = get_tables()
-                elif action == 'show_columns':
-                    table_name = model_response_json.get('table_name')
-                    if table_name:
-                        db_result_payload['table_name'] = table_name
-                        success, result_data = get_columns(table_name)
-                    else:
-                        result_data = "错误：'show_columns' 动作需要 'table_name' 参数"
-                elif action == 'show_create_table':
-                    table_name = model_response_json.get('table_name')
-                    if table_name:
-                        db_result_payload['table_name'] = table_name
-                        success, result_data = get_create_table_statement(table_name)
-                    else:
-                        result_data = "错误：'show_create_table' 动作需要 'table_name' 参数"
-                else:
-                    result_data = f"错误：未知的动作 '{action}'"
-
-                db_result_payload['result'] = result_data if success else f"数据库操作失败: {result_data}"
-                messages.append({"role": "user", "content": json.dumps(db_result_payload)})
-                continue
-
-            elif 'sql' in model_response_json:
-                sql_query = model_response_json['sql']
-                success, result_data = execute_sql(sql_query)
-                db_result_payload = {
-                    "sql": sql_query,
-                    "result": result_data if success else f"SQL 执行失败: {result_data}"
-                }
-                messages.append({"role": "user", "content": json.dumps(db_result_payload)})
-                continue
-
-            elif 'answer' in model_response_json:
-                final_answer = model_response_json['answer']
-                return True, final_answer
-            else:
-                logger.error(f"无法处理的 JSON 格式: {cleaned_response_str}")
-                error_message_to_model = {
-                    "error": "Unexpected JSON format received",
-                    "details": cleaned_response_str
-                }
-                messages.append({"role": "user", "content": json.dumps(error_message_to_model)})
-                continue
-
-        except Exception as e:
-            logger.error(f"处理 NL 到 SQL 时发生错误: {e}\n{traceback.format_exc()}")
-            return False, f"错误: {str(e)}"
-
-    logger.error("无法在指定次数内获取有效答案")
-    return False, "错误: 无法在指定次数内获取有效答案"
-
-def analyze_videos(frame: np.ndarray, model: str, history: list): # 为frame添加类型提示
+def analyze_videos(frame: np.ndarray, model: str, history: list):
     if frame is None:
-        logger.error("错误：输入的帧为 None，无法处理。")
-        # Return current history and an empty HTML update
         return history, "无新分析结果"
 
-    logger.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing frame, will work")
+    logger.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing frame...")
 
     try:
-        # 校正图像方向：
-        # flipCode = 1：水平翻转（左右）。
+        # 图像处理
         frame = cv2.flip(frame, 1)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # 将图像编码为 PNG 格式的字节并转为 base64
         _, buffer = cv2.imencode('.png', frame_rgb)
         base64_string = base64.b64encode(buffer).decode('utf-8')
         
-        # 准备 Ollama 的消息格式
+        # === 核心修改点：构建 OpenAI 兼容的视觉消息格式 ===
         messages = [
             {
                 "role": "user",
-                "content": "你是一个实时视频分析助手。请分析当前视频帧，输出一句中文，简洁描述主要内容，突出关键物体或场景。",
-                "images": [base64_string]  # 直接传递 base64 字符串
+                "content": [
+                    {
+                        "type": "text", 
+                        "text": "你是一个实时视频分析助手。请分析当前视频帧，输出一句中文，简洁描述主要内容。"
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64_string}"
+                        }
+                    }
+                ]
             }
         ]
-        # 调用 Ollama 模型
-        response = ollama_client.chat(model=model, messages=messages)
-        # 提取 Ollama 的回复
-        ollama_result = response.get("message", {}).get("content", "Ollama 未返回有效结果")
-
-        logger.info(f"Ollama 分析结果: {ollama_result[:40]}...")
         
-        # 更新历史记录
-        new_history = [f"[{time.strftime('%H:%M:%S')}] {ollama_result}"] + history
+        # 调用统一接口
+        llm_result = chat_with_llm(model, messages)
+        # ============================================
+
+        # 简单的后处理
+        llm_result = re.sub(r'(?i)<think\s*[^>]*>[\s\S]*?</think\s*>', '', llm_result).strip()
+
+        # 更新历史记录 (与原逻辑保持一致)
+        new_history = [f"[{time.strftime('%H:%M:%S')}] {llm_result}"] + history
         if len(new_history) > 5:
             new_history = new_history[:5]
 
-        # 格式化为 HTML 输出
         html_output = ""
         for i, result in enumerate(new_history):
             if i == 0:
-                # 高亮最新结果
                 html_output += f'<p style="background-color: #e0f7fa; color: #006064; padding: 8px; border-radius: 5px; margin-bottom: 5px;"><strong>最新:</strong> {result}</p>'
             else:
                 html_output += f'<p style="background-color: #f1f1f1; padding: 8px; border-radius: 5px; margin-bottom: 5px;">{result}</p>'
         
         return new_history, html_output
-    except cv2.error as e:
-        logger.error(f"OpenCV 错误：无法处理. 错误信息: {e}")
-        return history, f"OpenCV 错误: {e}"
+
     except Exception as e:
-        logger.error(f"发生未知错误：无法处理. 错误信息: {e}")
-        return history, f"未知错误: {e}" 
-
-
+        logger.error(f"分析错误: {e}")
+        return history, f"错误: {e}"
 # Gradio界面
 with gr.Blocks() as demo:
     gr.Markdown("# 音视频处理工具 (Gradio版)")
     gr.Markdown("提供视频/音频处理、语音识别、文字转语音、SRT处理、大语言模型聊天和自然语言数据库查询功能。")
 
-    model_choices = get_ollama_models()
+    # 1. 获取所有模型
+    model_choices = get_all_models()
+    
+    # 定义默认值逻辑 (如果有模型，取第一个，否则 None)
+    default_model = model_choices[0] if model_choices else None
     with gr.TabItem("视频工具"):
         with gr.Row():
             with gr.Column(scale=1):
@@ -1263,10 +897,10 @@ with gr.Blocks() as demo:
                         video_url_input = gr.Textbox(label="视频URL (例如 B站, YouTube)", placeholder="请输入视频链接...")
                         # ---- START: Place dropdowns in a new Row ----
                         with gr.Row():
-                            ollama_model_dropdown_video = gr.Dropdown(
+                            llm_model_dropdown_video = gr.Dropdown(
                                     label="选择模型",
                                     choices=model_choices,
-                                    value="qwen3:14b" if model_choices else None,
+                                    value=default_model,
                                     interactive=True,
                                     scale=1 # Optional: adjust scale for relative width
                                 )
@@ -1306,7 +940,7 @@ with gr.Blocks() as demo:
                             fn=summarize_video_url,
                             inputs=[
                                 video_url_input,
-                                ollama_model_dropdown_video,
+                                llm_model_dropdown_video,
                                 tts_voice_dropdown_video
                             ],
                             outputs=[
@@ -1433,53 +1067,15 @@ with gr.Blocks() as demo:
 
     with gr.TabItem("大模型工具"):
         with gr.Row():
-            # 自然语言查数据库模块
-            with gr.Column(scale=1):
-                with gr.Group():
-                    gr.Markdown("## 自然语言查数据库")
-                    sql_model_select = gr.Dropdown(
-                        label="选择模型",
-                        choices=get_all_models(),
-                        value="qwen3:14b" if model_choices else None,
-                        interactive=True
-                    )
-                    sql_input = gr.Textbox(
-                        label="输入查询",
-                        placeholder="输入自然语言查询，按回车或点击发送",
-                        elem_id="sql_input"
-                    )
-                    sql_btn = gr.Button("发送")
-                    sql_output = gr.Markdown(label="查询结果")
-
-                    def update_sql(query, model):
-                        logger.info(f"处理查询: {query}, 模型: {model}")
-                        if not query.strip():
-                            logger.warning("空查询")
-                            return "**错误: 请输入有效查询**", query
-                        success, result = nl_to_sql(query, model)
-                        logger.info(f"nl_to_sql 返回: success={success}, result={result}")
-                        if success:
-                            return result, query
-                        return result, query
-
-                    sql_input.submit(
-                        update_sql,
-                        inputs=[sql_input, sql_model_select],
-                        outputs=[sql_output, sql_input]
-                    )
-                    sql_btn.click(
-                        update_sql,
-                        inputs=[sql_input, sql_model_select],
-                        outputs=[sql_output, sql_input]
-                    )
-
-        with gr.Row():
             with gr.Column(scale=1):
                 with gr.Group():
                     gr.Markdown("## 大语言模型音频聊天")
                     # ---- START: Place dropdowns in a new Row ----
                     with gr.Row():
-                        model_select = gr.Dropdown(label="选择模型", choices=model_choices, value="qwen3:14b" if model_choices else None, interactive=True)
+                        model_select = gr.Dropdown(label="选择模型",
+                                                    choices=model_choices, 
+                                                    value=default_model, 
+                                                    interactive=True)
                         chat_voice_select = gr.Dropdown(
                             label="选择音色",
                             choices=[
@@ -1512,9 +1108,8 @@ with gr.Blocks() as demo:
                     chat_audio = gr.Audio(label="语音回复", autoplay=True)  # 启用自动播放
                     chat_error = gr.Textbox(label="错误信息", visible=False)
 
-                    # 包装chat_with_ollama，添加清空输入框
                     def update_chat(message, model, voice, history):
-                        new_history, audio, error = chat_with_ollama(message, model, voice, history)
+                        new_history, audio, error = chat_with_llm_return_voice(message, model, voice, history)
                         return new_history, audio, error, ""  # 清空输入框
 
                     chat_input.submit(
@@ -1538,7 +1133,11 @@ with gr.Blocks() as demo:
                     label="分析结果"
                 )
         with gr.Row():
-            model_select = gr.Dropdown(label="选择模型", choices=model_choices, allow_custom_value=False, value="qwen2.5vl:3b-q8_0" if model_choices else None, interactive=True)
+            model_select = gr.Dropdown(label="选择模型 (需支持Vision)",
+                                        choices=model_choices, 
+                                        allow_custom_value=False, 
+                                        value=default_model, 
+                                        interactive=True)
         dep = input_img.stream(
             fn=analyze_videos, 
             inputs=[input_img, model_select, analysis_history],
@@ -1548,4 +1147,8 @@ with gr.Blocks() as demo:
             time_limit=0.8    # 后端最长处理时间
         )
 # 启动Gradio应用
-demo.launch(server_name='0.0.0.0', server_port=7860, inbrowser=True, mcp_server=True)
+demo.launch(server_name='0.0.0.0', 
+            server_port=7860, 
+#           mcp_server=True,
+            inbrowser=True
+            )
